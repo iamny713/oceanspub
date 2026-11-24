@@ -1,4 +1,5 @@
-const key = 'oceanspub-poc-v2';
+const sampleMode = new URLSearchParams(location.search).get('sample') === '1';
+const key = sampleMode ? 'oceanspub-poc-prize-samples' : 'oceanspub-poc-v2';
 const admin = document.body.dataset.view === 'admin';
 const app = document.querySelector('#app');
 const date = (value = new Date()) => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(value);
@@ -38,6 +39,15 @@ function scoringText(type){
 }
 const missions = ['첫 게임 참가','데일리 입상','딥랭크 참가','포켓 페어로 승리','MTT 참가','쇼다운 승리','친구와 함께 방문','주간 랭킹 진입','데일리 우승'];
 const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const demoMonthly = {
+  items:['데일리 입상','딥랭크 참가','첫 게임 참가','친구와 방문','MTT 참가','쇼다운 승리'].map((name,index)=>({
+    name,done:[names[0],...(index<4?[names[1]]:[]),...(index===0?[names[2]]:[])]
+  })),
+  prizes:{1:'음료 1잔',4:'바인권 1개',5:'오션스 티켓 1개'}
+};
+function paymentId(category,period,name,tier){
+  return JSON.stringify([category,period,name,tier]);
+}
 const demo = {
   members:names,
   types:gameTypes,
@@ -46,19 +56,30 @@ const demo = {
     demoGame('daily',[names[0],names[1],names[2]]),
     demoGame('deep',[names[5],names[0],names[6]])
   ],
-  boards:{[currentMonth]:{missions, three:'음료 1잔', full:'매장 이용권', done:[[names[0],names[1]],[names[0]],[names[0]],[],[names[0]],[],[],[],[]]}},
-  stars:{[names[0]]:12,[names[1]]:7,[names[2]]:4}
+  boards:{[currentMonth]:{missions,three:'음료 1잔',full:'매장 이용권',
+    done:missions.map((_,index)=>[names[0],...(index<5?[names[1]]:[])])}},
+  stars:{[names[0]]:12,[names[1]]:24,[names[2]]:4},
+  monthlyMissions:{[currentMonth]:demoMonthly},
+  starAwards:[{member:names[1],mission:'프라이즈 지급',count:-20,day:today}],
+  prizePayments:[
+    {id:paymentId('bingo',currentMonth,names[0],'three'),category:'bingo',name:names[0],period:currentMonth,label:'3줄 달성',reward:'음료 1잔',day:today},
+    {id:paymentId('monthly',currentMonth,names[0],1),category:'monthly',name:names[0],period:currentMonth,label:'1개 달성',reward:'음료 1잔',day:today},
+    {id:'demo-star-payment',category:'stars',name:names[1],period:'',label:'별 20개 달성',reward:'별 20개 차감',day:today}
+  ]
 };
 function load(){
-  try {
-    const saved = JSON.parse(localStorage.getItem(key)) ?? structuredClone(demo);
-    saved.starMissions ??= [];
-    saved.starAwards ??= [];
-    saved.monthlyMissions ??= {};
-    saved.prizePayments ??= [];
-    return saved;
-  }
-  catch { return {...structuredClone(demo),starMissions:[],starAwards:[],monthlyMissions:{},prizePayments:[]}; }
+  let saved;
+  try { saved=JSON.parse(localStorage.getItem(key)); }
+  catch { saved=null; }
+  saved ??= structuredClone(demo);
+  saved.starMissions ??= [];
+  saved.starAwards ??= [];
+  saved.monthlyMissions ??= {};
+  saved.prizePayments ??= [];
+  const latestMonth=Object.keys(saved.monthlyMissions).sort().at(-1);
+  const latest=saved.monthlyMissions[latestMonth];
+  saved.monthlyTemplate ??= {names:latest?.items.map(item=>item.name).filter(Boolean) ?? [],prizes:latest?.prizes ?? {}};
+  return saved;
 }
 let data = load();
 const tabs = admin ? [['games','게임 결과'],['types','게임 종류'],['bingo','월간 빙고'],['monthly','월간 미션'],['payouts','프라이즈 지급'],['stars','회원 별 관리'],['members','회원 관리'],['stats','매장 통계']] :
@@ -158,16 +179,21 @@ function types(){
     <section class="panel"><h2>등록된 게임 종류</h2>${data.types.map(item=>`<div class="record"><div><strong>${esc(item.name)}</strong><small class="muted">${scoringText(item)}</small>
     <small class="muted">${typePrizeText(item) || '프라이즈 없음'}</small></div><button class="secondary" type="button" data-action="edit-type" data-id="${esc(item.id)}" aria-label="${esc(item.name)} 설정 수정">수정</button></div>`).join('')}</section></div>`;
 }
+function paidMembers(category,period){
+  return new Set(data.prizePayments.filter(item=>item.category===category && item.period===period).map(item=>item.name));
+}
+const paidLegend = '<span class="paid-nickname paid-legend">프라이즈 지급 완료</span>';
 function bingo(){
   const entry = board();
   const selection = `<label class="field">기준 월<input type="month" id="month" value="${month}"></label>`;
   if(!admin){
     if(!entry) return `<section class="panel">${selection}<p>이 달의 빙고 미션이 아직 등록되지 않았습니다.</p></section>`;
     const result = progress(entry,member);
+    const paid=paidMembers('bingo',month);
     return `<section class="panel"><div class="row headrow"><h2>월간 빙고</h2><span class="pill">${result.completed}/9칸 · ${result.rows}줄</span></div>
-    <div class="row">${selection}<label class="field">회원<select id="member">${memberOptions()}</select></label></div>
+    <div class="row">${selection}<label class="field">회원<select id="member">${memberOptions()}</select></label>${paid.size?paidLegend:''}</div>
     <div class="bingo public-board">${entry.missions.map((label,index)=>`<article class="tile ${result.done[index]?'done':''}">
-      <strong>${esc(label)}</strong><ul aria-label="달성 회원">${entry.done[index].map(name=>`<li class="${name===member?'selected':''}">${esc(name)}</li>`).join('') || '<li class="empty">달성 회원 없음</li>'}</ul>
+      <strong>${esc(label)}</strong><ul aria-label="달성 회원">${entry.done[index].map(name=>`<li class="${paid.has(name)?'paid-nickname':name===member?'selected':''}">${esc(name)}</li>`).join('') || '<li class="empty">달성 회원 없음</li>'}</ul>
     </article>`).join('')}</div>
     <div class="row"><span class="pill ${result.rows>=3?'gold':''}">3줄 · ${esc(entry.three)}${result.rows>=3?' ✓':''}</span><span class="pill ${result.completed===9?'gold':''}">전체 · ${esc(entry.full)}${result.completed===9?' ✓':''}</span></div></section>`;
   }
@@ -186,27 +212,41 @@ function bingo(){
     return `<div class="record"><strong>${esc(name)}</strong><span class="pill ${result.rows>=3?'gold':''}">${result.completed}/9칸 · ${result.rows}줄${result.completed===9?' · 전체 프라이즈':result.rows>=3?' · 3줄 프라이즈':''}</span></div>`;
   }).join('')}</section>`:''}</div></div>`;
 }
+function monthlyEntry(period){
+  const saved=data.monthlyMissions[period];
+  const items=saved?.items.filter(item=>item.name) ?? [];
+  const known=new Set(items.map(item=>item.name));
+  const template=period<currentMonth && saved ? [] : data.monthlyTemplate.names;
+  return {
+    items:[...items,...template.filter(name=>!known.has(name)).map(name=>({name,done:[]}))],
+    prizes:saved?.prizes ?? data.monthlyTemplate.prizes
+  };
+}
 function monthlyPage(){
-  const entry=data.monthlyMissions[missionMonth];
+  const entry=monthlyEntry(missionMonth);
+  const paid=paidMembers('monthly',missionMonth);
   const picker=`<label class="field">기준 월<input type="month" id="mission-month" value="${esc(missionMonth)}"></label>`;
-  const cards=entry?.items.map((item,index)=>item.name?`<article class="panel mission-card">
+  const cards=entry.items.map((item,index)=>`<article class="panel mission-card">
     <div class="row headrow"><h2>${esc(item.name)}</h2><span class="pill">${item.done.length}명</span></div>
     ${admin?`<form class="row" data-form="monthly-done">
       <input type="hidden" name="index" value="${index}">
       <label class="field grow">달성 회원<select name="member">${memberOptions()}</select></label><button class="primary">달성 등록</button>
     </form>`:''}
-    <ul class="nickname-list" aria-label="달성 회원">${item.done.map(name=>`<li>${esc(name)}${admin?`
-      <button type="button" class="secondary nickname-remove" data-action="monthly-undo" data-index="${index}" data-name="${esc(name)}" aria-label="${esc(name)} 달성 취소">×</button>`:''}</li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul></article>`:'').join('') ?? '';
-  const prizes=entry?`<div class="row">${missionMilestones.map(count=>`<span class="pill gold">${count}개 · ${esc(entry.prizes[count]) || '프라이즈 미정'}</span>`).join('')}</div>`:'';
-  if(!admin) return `<section class="panel"><div class="row headrow">${picker}${prizes}</div>
-    ${cards?`<div class="mission-grid">${cards}</div>`:'<p class="muted">이 달에 등록된 미션이 없습니다.</p>'}</section>`;
-  return `<div class="grid"><section class="panel"><h2>월별 미션 설정</h2>${picker}
-    <form class="stack monthly-settings" data-form="monthly-settings">
-    <span class="muted">최대 5개까지 등록할 수 있습니다. 미션 이름을 바꾸면 그 칸의 달성 기록이 초기화됩니다.</span>
-    ${Array.from({length:5},(_,index)=>`<label class="field">미션 ${index+1}<input name="mission" value="${esc(entry?.items[index]?.name)}" maxlength="40"></label>`).join('')}
-    ${missionMilestones.map(count=>`<label class="field">${count}개 달성 프라이즈<input name="prize-${count}" value="${esc(entry?.prizes[count])}" maxlength="50"></label>`).join('')}
-    <div><button class="primary">월간 미션 저장</button></div></form></section>
-    <div>${cards || '<section class="panel">먼저 이 달의 미션을 저장하세요.</section>'}</div></div>`;
+    <ul class="nickname-list" aria-label="달성 회원">${item.done.map(name=>`<li class="${!admin && paid.has(name)?'paid-nickname':''}">${esc(name)}${admin?`
+      <button type="button" class="secondary nickname-remove" data-action="monthly-undo" data-index="${index}" data-name="${esc(name)}" aria-label="${esc(name)} 달성 취소">×</button>`:''}</li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul></article>`).join('');
+  const prizes=entry.items.length?`<div class="row">${missionMilestones.map(count=>`<span class="pill gold">${count}개 · ${esc(entry.prizes[count]) || '프라이즈 미정'}</span>`).join('')}</div>`:'';
+  if(!admin) return `<section class="panel"><div class="row headrow">${picker}${prizes}${paid.size?paidLegend:''}</div>
+    ${cards?`<div class="mission-grid">${cards}</div>`:'<p class="muted">등록된 월간 미션이 없습니다.</p>'}</section>`;
+  const template=data.monthlyTemplate;
+  return `<div class="grid"><section class="panel"><h2>공통 미션 템플릿</h2>
+    <form class="stack" data-form="monthly-template">
+    <p class="muted">등록한 미션을 매월 사용합니다. 달성 회원은 월별 달성 기록에서 입력하세요.</p>
+    <label class="field">새 미션 이름<input name="mission" maxlength="40"></label>
+    ${missionMilestones.map(count=>`<label class="field">${count}개 달성 프라이즈<input name="prize-${count}" value="${esc(template.prizes[count])}" maxlength="50"></label>`).join('')}
+    <div><button class="primary">템플릿 저장</button></div></form>
+    ${template.names.length?`<ul class="nickname-list">${template.names.map(name=>`<li>${esc(name)}</li>`).join('')}</ul>`:''}</section>
+    <div><section class="panel"><h2>월별 달성 기록</h2>${picker}</section>
+    ${cards || '<section class="panel">먼저 공통 미션을 등록하세요.</section>'}</div></div>`;
 }
 const payoutLabels = {weekly:'주간 랭킹',monthly:'월간 미션',bingo:'월간 빙고',stars:'별 모으기'};
 function pendingPrizes(){
@@ -214,16 +254,16 @@ function pendingPrizes(){
   const paid=new Set(data.prizePayments.map(item=>item.id));
   const candidates=[];
   const add=(category,name,periodKey,tier,label,reward='')=>{
-    const id=JSON.stringify([category,periodKey,name,tier]);
+    const id=paymentId(category,periodKey,name,tier);
     if(!paid.has(id)) candidates.push({id,category,name,period:periodKey,label,reward});
   };
   for(const {name,rank} of ranking(period)){
     if(rank<=5) add('weekly',name,period[0],'rank',`${rank}위`);
   }
-  const monthly=data.monthlyMissions[prizeMonth];
+  const monthly=monthlyEntry(prizeMonth);
   const bingo=data.boards[prizeMonth];
   for(const name of data.members){
-    if(monthly){
+    if(monthly.items.length){
       const count=monthly.items.filter(item=>item.name && item.done.includes(name)).length;
       for(const milestone of missionMilestones){
         if(count>=milestone) add('monthly',name,prizeMonth,milestone,`${milestone}개 달성`,monthly.prizes[milestone]);
@@ -244,7 +284,7 @@ function pendingPrizes(){
 function payoutPage(){
   const pending=pendingPrizes();
   const period=weekRange(prizeWeekDay);
-  return `<section class="panel"><div class="row headrow"><h2>지급 대기</h2><span class="pill">${pending.length}건</span></div>
+  return `<section class="panel"><div class="row headrow"><h2>지급 대기</h2><span class="pill">${pending.length}건</span>${sampleMode?'<span class="pill gold">샘플 데이터</span>':'<a class="secondary" href="?sample=1#payouts">지급 샘플 열기</a>'}</div>
     <div class="row">
       <label class="field">주간 랭킹 기준일<input type="date" id="prize-week" min="1000-01-01" max="9998-12-31" value="${esc(prizeWeekDay)}"></label>
       <span class="muted">${period.join(' ~ ')}</span>
@@ -411,7 +451,7 @@ function render(){
   const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':'HOLD’EM PUB'}</small></div></div>`;
   const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],monthly:['월간 미션','월별 미션을 등록하고 회원별 달성을 기록하세요.'],payouts:['프라이즈 지급','지급 대상을 확인하고 프라이즈 지급을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','기간별 경기와 회원별 활동을 확인하세요.']}:
     {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],monthly:['월간 미션','이번 달 미션과 달성 회원을 확인하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
-  const switcher = admin ? '<a class="switch" href="guest.html">손님 화면 보기 ↗</a>' :
+  const switcher = admin ? `<a class="switch" href="guest.html${sampleMode?'?sample=1':''}">손님 화면 보기 ↗</a>` :
     `<button class="switch fullscreen" type="button" data-action="fullscreen" ${document.fullscreenEnabled?'':'hidden'}>${document.fullscreenElement?'전체 화면 종료':'전체 화면'}</button>`;
   const main = `<main class="${!admin && tab==='bingo'?'bingo-main':''}"><div class="hero"><div class="eyebrow">${admin?'오션스펍 매장 관리':'오션스펍'}</div><h1>${heading[tab][0]}</h1><p>${heading[tab][1]}</p></div>
   <p class="status" role="status">${esc(notice)}</p>
@@ -447,8 +487,11 @@ app.addEventListener('click',event=>{
     else {notice='이미 지급했거나 지급 대상이 바뀌었습니다.';render();}
   }
   if(action==='monthly-undo'){
-    const item=data.monthlyMissions[missionMonth].items[Number(button.dataset.index)];
+    const entry=monthlyEntry(missionMonth);
+    const item=entry.items[Number(button.dataset.index)];
+    if(!item) return;
     item.done=item.done.filter(name=>name!==button.dataset.name);
+    data.monthlyMissions[missionMonth]=entry;
     save('월간 미션 달성 기록을 취소했습니다.');
   }
   if(action==='member-week' || action==='member-month'){
@@ -609,22 +652,23 @@ app.addEventListener('submit',event=>{
     if(!item) return fail(`별이 ${prizeCost}개 이상 있어야 차감할 수 있습니다.`);
     payPrize(item);
   }
-  if(form.dataset.form==='monthly-settings'){
-    const labels=fields.getAll('mission').map(label=>label.trim());
-    const filled=labels.filter(Boolean);
-    if(!filled.length || new Set(filled).size!==filled.length) return fail('서로 다른 미션을 1~5개 입력하세요.');
-    const previous=data.monthlyMissions[missionMonth];
-    const items=labels.map((name,index)=>({name,done:name && name===previous?.items[index]?.name ? previous.items[index].done : []}));
-    const prizes=Object.fromEntries(missionMilestones.map(count=>[count,fields.get('prize-'+count).trim()]));
-    data.monthlyMissions[missionMonth]={items,prizes};
-    save('월간 미션을 저장했습니다.');
+  if(form.dataset.form==='monthly-template'){
+    const name=fields.get('mission').trim();
+    const template=data.monthlyTemplate;
+    if(name && template.names.includes(name)) return fail('이미 등록한 미션입니다.');
+    if(name) template.names.push(name);
+    template.prizes=Object.fromEntries(missionMilestones.map(count=>[count,fields.get('prize-'+count).trim()]));
+    if(data.monthlyMissions[currentMonth]) data.monthlyMissions[currentMonth].prizes=template.prizes;
+    save('공통 미션 템플릿을 저장했습니다.');
   }
   if(form.dataset.form==='monthly-done'){
     const name=fields.get('member');
-    const item=data.monthlyMissions[missionMonth].items[Number(fields.get('index'))];
-    if(!item?.name || !data.members.includes(name)) return fail('미션과 회원을 선택하세요.');
+    const entry=monthlyEntry(missionMonth);
+    const item=entry.items[Number(fields.get('index'))];
+    if(!item || !data.members.includes(name)) return fail('미션과 회원을 선택하세요.');
     if(item.done.includes(name)) return fail('이미 달성으로 기록된 회원입니다.');
     item.done.push(name);
+    data.monthlyMissions[missionMonth]=entry;
     member=name;
     save(`${name} 회원의 월간 미션 달성을 기록했습니다.`);
   }
