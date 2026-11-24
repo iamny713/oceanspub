@@ -260,6 +260,21 @@ function monthlyEntry(period){
     prizes:saved?.prizes ?? data.monthlyTemplate.prizes
   };
 }
+function monthlyCompletionCount(entry,name){
+  return entry.items.filter(item=>item.done.includes(name)).length;
+}
+function monthlyProgressTable(entry){
+  if(!entry.items.length) return '';
+  const paid=new Set(data.prizePayments.map(item=>item.id));
+  const rows=data.members.map(name=>[name,monthlyCompletionCount(entry,name)])
+    .sort(([,a],[,b])=>b-a)
+    .map(([name,count])=>[name,`${count} / ${entry.items.length}개`,...missionMilestones.map(milestone=>{
+      if(paid.has(paymentId('monthly',missionMonth,name,milestone))) return '지급 완료';
+      return count>=milestone ? '지급 대상' : '—';
+    })]);
+  return `<section class="panel"><h2>회원별 미션 달성 현황</h2>
+  ${statTable(['회원','달성 개수',...missionMilestones.map(count=>`${count}개 프라이즈`)],rows)}</section>`;
+}
 function monthlyPage(){
   const entry=monthlyEntry(missionMonth);
   const paid=paidMembers('monthly',missionMonth);
@@ -279,12 +294,14 @@ function monthlyPage(){
   return `<div class="grid"><section class="panel"><h2>공통 미션 템플릿</h2>
     <form class="stack" data-form="monthly-template">
     <p class="muted">등록한 미션을 매월 사용합니다. 달성 회원은 월별 달성 기록에서 입력하세요.</p>
-    <label class="field">새 미션 이름<input name="mission" maxlength="40"></label>
+    <label class="field">추가할 미션<textarea name="missions" rows="5" placeholder="데일리 입상&#10;딥랭크 참가&#10;친구와 방문" aria-describedby="mission-template-help"></textarea></label>
+    <small class="muted" id="mission-template-help">한 줄에 하나씩 입력하면 여러 미션을 한 번에 추가할 수 있습니다.</small>
+    <h3 class="mission-tier-heading">달성 개수별 프라이즈</h3>
     ${missionMilestones.map(count=>`<label class="field">${count}개 달성 프라이즈<input name="prize-${count}" value="${esc(template.prizes[count])}" maxlength="50"></label>`).join('')}
     <div><button class="primary">템플릿 저장</button></div></form>
-    ${template.names.length?`<ul class="nickname-list">${template.names.map(name=>`<li>${esc(name)}</li>`).join('')}</ul>`:''}</section>
+    ${template.names.length?`<h3 class="mission-tier-heading">등록된 미션 ${template.names.length}개</h3><ul class="nickname-list">${template.names.map(name=>`<li>${esc(name)}</li>`).join('')}</ul>`:''}</section>
     <div><section class="panel"><h2>월별 달성 기록</h2>${picker}</section>
-    ${cards || '<section class="panel">먼저 공통 미션을 등록하세요.</section>'}</div></div>`;
+    ${monthlyProgressTable(entry)}${cards || '<section class="panel">먼저 공통 미션을 등록하세요.</section>'}</div></div>`;
 }
 const payoutLabels = {weekly:'주간 랭킹',monthly:'월간 미션',bingo:'월간 빙고',stars:'별 모으기'};
 function pendingPrizes(){
@@ -302,7 +319,7 @@ function pendingPrizes(){
   const bingo=data.boards[prizeMonth];
   for(const name of data.members){
     if(monthly.items.length){
-      const count=monthly.items.filter(item=>item.name && item.done.includes(name)).length;
+      const count=monthlyCompletionCount(monthly,name);
       for(const milestone of missionMilestones){
         if(count>=milestone) add('monthly',name,prizeMonth,milestone,`${milestone}개 달성`,monthly.prizes[milestone]);
       }
@@ -718,13 +735,15 @@ app.addEventListener('submit',event=>{
     payPrize(item);
   }
   if(form.dataset.form==='monthly-template'){
-    const name=fields.get('mission').trim();
+    const names=fields.get('missions').split(/\r?\n/).map(name=>name.trim()).filter(Boolean);
     const template=data.monthlyTemplate;
-    if(name && template.names.includes(name)) return fail('이미 등록한 미션입니다.');
-    if(name) template.names.push(name);
+    if(names.some(name=>name.length>40)) return fail('미션 이름은 한 줄에 40자 이내로 입력하세요.');
+    const combined=[...template.names,...names];
+    if(new Set(combined).size!==combined.length) return fail('중복된 미션 이름이 있습니다. 새 미션마다 다른 이름을 입력하세요.');
+    template.names=combined;
     template.prizes=Object.fromEntries(missionMilestones.map(count=>[count,fields.get('prize-'+count).trim()]));
     if(data.monthlyMissions[currentMonth]) data.monthlyMissions[currentMonth].prizes=template.prizes;
-    save('공통 미션 템플릿을 저장했습니다.');
+    save(names.length?`공통 미션 ${names.length}개를 추가했습니다.`:'달성 개수별 프라이즈를 저장했습니다.');
   }
   if(form.dataset.form==='monthly-done'){
     const name=fields.get('member');
