@@ -28,7 +28,20 @@ function gameRecord(day,type,participants){
     buyIn:type.prizes?.[rank-1]?.buyIn ?? 0,
     ticket:type.prizes?.[rank-1]?.ticket ?? 0
   }));
-  return {day,type:type.name,results:results.sort((a,b)=>a.rank-b.rank)};
+  const rules={points:[...type.points],prizes:(type.prizes ?? []).map(prize=>({...prize}))};
+  return {day,type:type.name,rules,results:results.sort((a,b)=>a.rank-b.rank)};
+}
+function gameRules(type,record){
+  if(record?.type!==type.name) return type;
+  if(record.rules) return {...type,...record.rules};
+  const points=[...type.points];
+  const prizes=[...(type.prizes ?? [])];
+  for(const result of record.results){
+    points[result.rank-1]=result.points;
+    prizes[result.rank-1]={buyIn:result.buyIn ?? 0,ticket:result.ticket ?? 0};
+  }
+  for(let index=0;index<prizes.length;index++) prizes[index] ??= {buyIn:0,ticket:0};
+  return {...type,points,prizes};
 }
 function demoGame(id,participants){
   const type = gameTypes.find(type=>type.id===id);
@@ -100,6 +113,8 @@ let statsPeriod = 'month';
 let starPageIndex = 0;
 const prizeCost = 20;
 let editingType = '';
+let editingGame = null;
+let openGameDay = '';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
 const options = (items, selected) => items.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`).join('');
@@ -144,20 +159,43 @@ function refreshRanks(){
     input.dataset.rank = index+1;
   });
 }
-function gameRow(rank){
+function gameRow(rank,name=''){
   return `<div class="result-row"><label class="field">순위<select name="rank" aria-label="순위">${rankOptions(3,rank)}</select></label>
-    <label class="field">회원 닉네임<input name="name" list="members" placeholder="기존 회원 검색 또는 신규 입력" maxlength="30" required></label>
+    <label class="field">회원 닉네임<input name="name" list="members" placeholder="기존 회원 검색 또는 신규 입력" maxlength="30" value="${esc(name)}" required></label>
     <button class="secondary" type="button" data-action="remove-row" aria-label="참가자 행 삭제">삭제</button></div>`;
 }
+function gameHistory(){
+  const days=new Map();
+  data.games.forEach((game,index)=>{
+    if(!days.has(game.day)) days.set(game.day,[]);
+    days.get(game.day).unshift({game,index});
+  });
+  const sorted=[...days].sort(([a],[b])=>b.localeCompare(a));
+  return `<section class="panel game-history"><div class="row headrow"><h2>경기 기록</h2><span class="pill">${data.games.length}경기</span></div>
+    ${sorted.map(([day,records])=>`<details class="history-date" ${day===(days.has(openGameDay)?openGameDay:sorted[0][0])?'open':''}>
+      <summary><strong>${esc(day)}</strong><span class="pill">${records.length}경기</span></summary>
+      <div class="history-games">${records.map(({game,index})=>`<article class="history-game">
+        <div class="row headrow"><div><h3>${esc(game.type)}</h3><span class="muted">참가 ${game.results.length}명</span></div>
+        <button class="secondary" type="button" data-action="edit-game" data-index="${index}" aria-label="${esc(day+' '+game.type)} 경기 수정">수정</button></div>
+        ${statTable(['순위','회원','점수','프라이즈'],game.results.map(result=>[`${result.rank}위`,result.name,`${result.points}점`,prizeText(result) || '—']))}
+      </article>`).join('')}</div>
+    </details>`).join('') || '<p class="muted">아직 저장된 경기 기록이 없습니다.</p>'}</section>`;
+}
 function games(){
-  return `<div class="grid"><section class="panel"><h2>게임 결과 등록</h2><form class="stack" data-form="game">
-  <div class="row"><label class="field grow">경기일<input name="day" type="date" value="${today}" required></label>
-  <label class="field grow">게임 종류<select name="type" required>${options(data.types.map(type=>[type.id,type.name]))}</select></label></div>
-  <div class="pill" id="scoring"></div><small class="muted">순위를 터치해 선택하면 기존 참가자와 순위가 바뀝니다.</small><div class="stack" id="results">${[1,2,3].map(gameRow).join('')}</div>
+  const record=editingGame?.record;
+  const selectedType=data.types.find(type=>type.name===record?.type)?.id;
+  const participants=record?.results ?? [1,2,3].map(rank=>({rank,name:''}));
+  return `<div class="grid"><section class="panel" id="game-editor"><div class="row headrow">
+  <h2 id="game-editor-title" tabindex="-1">${record?'경기 기록 수정':'게임 결과 등록'}</h2>
+  ${record?'<span class="pill gold">수정 중</span>':''}</div><form class="stack" data-form="game">
+  <div class="row"><label class="field grow">경기일<input name="day" type="date" value="${esc(record?.day ?? today)}" required></label>
+  <label class="field grow">게임 종류<select name="type" required>${options(data.types.map(type=>[type.id,type.name]),selectedType)}</select></label></div>
+  <div class="pill" id="scoring"></div><small class="muted">순위를 터치해 선택하면 기존 참가자와 순위가 바뀝니다.</small><div class="stack" id="results">${participants.map(({rank,name})=>gameRow(rank,name)).join('')}</div>
   <datalist id="members">${memberOptions()}</datalist>
-  <div class="row"><button class="secondary" type="button" data-action="add-row">＋ 참가자 추가</button><button class="primary" type="submit">결과 저장</button></div>
-  </form></section><div>${leaderboard()}<section class="panel"><h2>경기 기록</h2>
-  ${data.games.slice().reverse().map(game=>`<div class="record"><div><strong>${esc(game.type)}</strong><small class="muted">${game.results.map(result=>`${result.rank}위 ${esc(result.name)} (${result.points}점${prizeText(result)?' · '+prizeText(result):''})`).join(' · ')}</small></div><span class="pill">${esc(game.day)}</span></div>`).join('')}</section></div></div>`;
+  <div class="row"><button class="secondary" type="button" data-action="add-row">＋ 참가자 추가</button>
+  <button class="primary" type="submit">${record?'수정 저장':'결과 저장'}</button>
+  ${record?'<button class="secondary" type="button" data-action="cancel-game">수정 취소</button>':''}</div>
+  </form></section>${leaderboard()}</div>${gameHistory()}`;
 }
 function pointRow(rank,type){
   const prize=type?.prizes?.[rank-1];
@@ -466,7 +504,7 @@ function showScoring(){
   const element = document.querySelector('#scoring');
   if(!element) return;
   const id = document.querySelector('select[name=type]').value;
-  const type=data.types.find(type=>type.id===id);
+  const type=gameRules(data.types.find(type=>type.id===id),editingGame?.record);
   element.textContent = [scoringText(type),typePrizeText(type)].filter(Boolean).join(' | ');
 }
 app.addEventListener('click',event=>{
@@ -480,6 +518,23 @@ app.addEventListener('click',event=>{
     document.querySelector('[aria-current=page]').focus();
   }
   const action = button.dataset.action;
+  if(action==='edit-game'){
+    const index=Number(button.dataset.index);
+    const record=data.games[index];
+    if(!record) return;
+    editingGame={index,record};
+    openGameDay=record.day;
+    notice='';
+    render();
+    document.querySelector('#game-editor-title').focus();
+  }
+  if(action==='cancel-game'){
+    const index=editingGame.index;
+    editingGame=null;
+    notice='';
+    render();
+    document.querySelector(`[data-action="edit-game"][data-index="${index}"]`)?.focus();
+  }
   if(action==='pay-prize'){
     data=load();
     const item=pendingPrizes().find(candidate=>candidate.id===button.dataset.id);
@@ -603,10 +658,20 @@ app.addEventListener('submit',event=>{
     const participants=fields.getAll('name').map(name=>name.trim());
     if(participants.some(name=>!name) || new Set(participants).size!==participants.length) return fail('중복 없이 참가자 닉네임을 입력하세요.');
     if(new Set(ranks).size!==ranks.length) return fail('한 경기에서 같은 순위를 중복 입력할 수 없습니다.');
+    data=load();
+    const previous=editingGame && data.games[editingGame.index];
+    if(editingGame && JSON.stringify(previous)!==JSON.stringify(editingGame.record)){
+      return fail('이 경기 기록이 다른 탭에서 변경되었습니다. 수정을 취소하고 다시 열어 주세요.');
+    }
     const newMembers=participants.filter(name=>!data.members.includes(name));
+    const record=gameRecord(fields.get('day'),gameRules(type,previous),participants.map((name,index)=>({name,rank:ranks[index]})));
     data.members.push(...newMembers);
-    data.games.push(gameRecord(fields.get('day'),type,participants.map((name,index)=>({name,rank:ranks[index]}))));
-    save(newMembers.length?`경기 결과를 저장하고 신규 회원 ${newMembers.length}명을 등록했습니다.`:'경기 결과를 저장했습니다.');
+    if(editingGame) data.games[editingGame.index]=record;
+    else data.games.push(record);
+    const message=editingGame?'경기 기록을 수정했습니다.':'경기 결과를 저장했습니다.';
+    editingGame=null;
+    openGameDay=record.day;
+    save(newMembers.length?`${message} 신규 회원 ${newMembers.length}명을 등록했습니다.`:message);
   }
   if(form.dataset.form==='type'){
     const type=data.types.find(item=>item.id===editingType);
