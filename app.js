@@ -15,8 +15,21 @@ const gameTypes = [
   {id:'deep',name:'딥랭크',points:[5,3]},
   {id:'mtt',name:'MTT',points:[100,65,40,25,15]}
 ];
+function prizeText({buyIn=0,ticket=0}){
+  return [buyIn && `바인권 ${buyIn}개`,ticket && `오션스 티켓 ${ticket}개`].filter(Boolean).join(' · ');
+}
+function typePrizeText(type){
+  return (type.prizes ?? []).map((prize,index)=>{
+    const label=prizeText(prize);
+    return label ? `${index+1}위 ${label}` : '';
+  }).filter(Boolean).join(' / ');
+}
 function gameRecord(day,type,participants){
-  const results = participants.map(({rank,name})=>({rank,name,points:type.points[rank-1] ?? 0}));
+  const results = participants.map(({rank,name})=>({
+    rank,name,points:type.points[rank-1] ?? 0,
+    buyIn:type.prizes?.[rank-1]?.buyIn ?? 0,
+    ticket:type.prizes?.[rank-1]?.ticket ?? 0
+  }));
   return {day,type:type.name,results:results.sort((a,b)=>a.rank-b.rank)};
 }
 function demoGame(id,participants){
@@ -62,6 +75,7 @@ let statsDay = today;
 let statsPeriod = 'month';
 let starPageIndex = 0;
 const prizeCost = 20;
+let editingType = '';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
 const options = (items, selected) => items.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`).join('');
@@ -119,19 +133,27 @@ function games(){
   <datalist id="members">${memberOptions()}</datalist>
   <div class="row"><button class="secondary" type="button" data-action="add-row">＋ 참가자 추가</button><button class="primary" type="submit">결과 저장</button></div>
   </form></section><div>${leaderboard()}<section class="panel"><h2>경기 기록</h2>
-  ${data.games.slice().reverse().map(game=>`<div class="record"><div><strong>${esc(game.type)}</strong><small class="muted">${game.results.map(result=>`${result.rank}위 ${esc(result.name)} (${result.points}점)`).join(' · ')}</small></div><span class="pill">${esc(game.day)}</span></div>`).join('')}</section></div></div>`;
+  ${data.games.slice().reverse().map(game=>`<div class="record"><div><strong>${esc(game.type)}</strong><small class="muted">${game.results.map(result=>`${result.rank}위 ${esc(result.name)} (${result.points}점${prizeText(result)?' · '+prizeText(result):''})`).join(' · ')}</small></div><span class="pill">${esc(game.day)}</span></div>`).join('')}</section></div></div>`;
 }
-function pointRow(rank){
-  return `<label class="field point-row"><span class="pill">${rank}위</span><input name="points" type="number" min="0" step="1" inputmode="numeric" aria-label="${rank}위 점수" value="0" required><span>점</span></label>`;
+function pointRow(rank,type){
+  const prize=type?.prizes?.[rank-1];
+  return `<div class="prize-row"><span class="pill">${rank}위</span>
+  <label class="field">점수<input name="points" type="number" min="0" step="1" inputmode="numeric" aria-label="${rank}위 점수" value="${type?.points[rank-1] ?? 0}" required></label>
+  <label class="field">바인권<input name="buyIn" type="number" min="0" step="1" inputmode="numeric" aria-label="${rank}위 바인권" value="${prize?.buyIn ?? 0}" required></label>
+  <label class="field">오션스 티켓<input name="ticket" type="number" min="0" step="1" inputmode="numeric" aria-label="${rank}위 오션스 티켓" value="${prize?.ticket ?? 0}" required></label></div>`;
 }
 function types(){
-  return `<div class="grid"><section class="panel"><h2>게임 종류 추가</h2><form class="stack" data-form="type">
-    <label class="field">게임 이름<input name="name" placeholder="예: 주말 토너먼트" maxlength="30" required></label>
-    <label class="row"><input type="checkbox" name="unscored"> 랭킹 점수 없는 게임</label>
-    <div id="point-settings" class="stack"><div id="point-rows" class="stack">${[1,2].map(pointRow).join('')}</div>
-    <div class="row"><button class="secondary" type="button" data-action="add-point">＋ 배점 추가</button><button class="secondary" type="button" data-action="remove-point">마지막 배점 삭제</button></div></div>
-    <div><button class="primary">게임 종류 추가</button></div></form></section>
-    <section class="panel"><h2>등록된 게임 종류</h2>${data.types.map(type=>`<div class="record"><div><strong>${esc(type.name)}</strong><small class="muted">${scoringText(type)}</small></div></div>`).join('')}</section></div>`;
+  const type=data.types.find(item=>item.id===editingType);
+  const size=Math.max(2,type?.points.length ?? 0,type?.prizes?.length ?? 0);
+  return `<div class="grid"><section class="panel"><h2>${type?'게임 종류 수정':'게임 종류 추가'}</h2><form class="stack" data-form="type">
+    <label class="field">게임 이름<input name="name" placeholder="예: 주말 토너먼트" maxlength="30" value="${esc(type?.name)}" ${type?'readonly':''} required></label>
+    <label class="row"><input type="checkbox" name="unscored" ${type && !type.points.length?'checked':''}> 랭킹 점수 없는 게임</label>
+    <p class="muted">순위마다 바인권과 오션스 티켓 수량을 입력하세요. 새 설정은 앞으로 저장할 경기에 적용됩니다.</p>
+    <div id="point-rows" class="stack">${Array.from({length:size},(_,index)=>pointRow(index+1,type)).join('')}</div>
+    <div class="row"><button class="secondary" type="button" data-action="add-point">＋ 순위 추가</button><button class="secondary" type="button" data-action="remove-point">마지막 순위 삭제</button></div>
+    <div class="row"><button class="primary">${type?'변경 저장':'게임 종류 추가'}</button>${type?'<button class="secondary" type="button" data-action="cancel-type">취소</button>':''}</div></form></section>
+    <section class="panel"><h2>등록된 게임 종류</h2>${data.types.map(item=>`<div class="record"><div><strong>${esc(item.name)}</strong><small class="muted">${scoringText(item)}</small>
+    <small class="muted">${typePrizeText(item) || '프라이즈 없음'}</small></div><button class="secondary" type="button" data-action="edit-type" data-id="${esc(item.id)}" aria-label="${esc(item.name)} 설정 수정">수정</button></div>`).join('')}</section></div>`;
 }
 function bingo(){
   const entry = board();
@@ -206,12 +228,15 @@ function starPage(){
   ${available.map(item=>`<div class="record"><strong>${esc(item.name)}</strong><button class="secondary" data-action="delete-star-mission" data-id="${esc(item.id)}" aria-label="${esc(item.name)} 미션 삭제">삭제</button></div>`).join('')}</section></div>`;
 }
 function memberStats(games){
-  const records = new Map(data.members.map(name=>[name,{games:0,wins:0,finishTotal:0,days:new Set(),last:''}]));
+  const records = new Map(data.members.map(name=>[name,{games:0,wins:0,finishTotal:0,paidGames:0,buyIn:0,ticket:0,days:new Set(),last:''}]));
   for(const game of games){
     for(const result of game.results){
       const stats = records.get(result.name);
       stats.games++;
       stats.finishTotal += result.rank / game.results.length;
+      stats.buyIn += result.buyIn ?? 0;
+      stats.ticket += result.ticket ?? 0;
+      if(result.buyIn>0 || result.ticket>0) stats.paidGames++;
       if(result.rank===1) stats.wins++;
       stats.days.add(game.day);
       if(game.day>stats.last) stats.last=game.day;
@@ -235,11 +260,12 @@ function members(){
   <label class="field">종료일<input type="date" name="end" value="${esc(end)}" required></label>
   <button class="primary" type="submit">조회</button></form></section>
   <section class="panel"><div class="row headrow"><h2>전체 회원</h2><span class="pill">${esc(start)} ~ ${esc(end)} · ${data.members.length}명</span></div>
-  <p class="muted">상위 비율은 경기별 순위 ÷ 기록된 참가자 수의 평균입니다. 숫자가 작을수록 성적이 높습니다.<br>승률은 1위 횟수 ÷ 참가 게임 수이며, 같은 날 여러 게임에 참가해도 방문은 1일로 집계합니다.</p>
-  ${statTable(['회원','참가 횟수','승률','평균 상위 비율','방문 일수','마지막 방문일 (전체 기간)'],data.members.map(name=>{
+  <p class="muted">상위 비율은 경기별 순위 ÷ 기록된 참가자 수의 평균입니다. 숫자가 작을수록 성적이 높습니다.<br>승률은 1위 횟수 ÷ 참가 게임 수이며, 같은 날 여러 게임에 참가해도 방문은 1일로 집계합니다.<br>인머니는 프라이즈를 받은 경기 수 ÷ 전체 참가 경기 수입니다.</p>
+  ${statTable(['회원','참가 횟수','승률','평균 상위 비율','바인권 획득','오션스 티켓 획득','인머니 비율','방문 일수','마지막 방문일 (전체 기간)'],data.members.map(name=>{
     const record=selected.get(name);
     const finish=record.games ? `상위 ${(record.finishTotal / record.games * 100).toFixed(1)}%` : '—';
-    return [name,record.games,winRate(record),finish,record.days.size,all.get(name).last || '—'];
+    const itm=record.games ? `${(record.paidGames / record.games * 100).toFixed(1)}%` : '—';
+    return [name,record.games,winRate(record),finish,record.buyIn,record.ticket,itm,record.days.size,all.get(name).last || '—'];
   }))}</section>`;
 }
 function monthRange(month){
@@ -310,12 +336,14 @@ function render(){
     `<header class="guestbar"><div>${brand}${menu}${switcher}</div></header>${main}`;
   showScoring();
   if(tab==='games') refreshRanks();
+  if(tab==='types') syncPointFields();
 }
 function showScoring(){
   const element = document.querySelector('#scoring');
   if(!element) return;
   const id = document.querySelector('select[name=type]').value;
-  element.textContent = scoringText(data.types.find(type=>type.id===id));
+  const type=data.types.find(type=>type.id===id);
+  element.textContent = [scoringText(type),typePrizeText(type)].filter(Boolean).join(' | ');
 }
 app.addEventListener('click',event=>{
   const button = event.target.closest('button');
@@ -358,10 +386,17 @@ app.addEventListener('click',event=>{
     button.closest('.result-row').remove();
     refreshRanks();
   }
+  if(action==='edit-type' || action==='cancel-type'){
+    editingType=action==='edit-type' ? button.dataset.id : '';
+    notice='';
+    render();
+    document.querySelector('[data-form=type] input:not([readonly])').focus();
+  }
   if(action==='add-point'){
     const rows=document.querySelector('#point-rows');
     rows.insertAdjacentHTML('beforeend',pointRow(rows.children.length+1));
-    rows.lastElementChild.querySelector('input').focus();
+    syncPointFields();
+    rows.lastElementChild.querySelector('input:not(:disabled)').focus();
   }
   if(action==='remove-point'){
     const rows=document.querySelector('#point-rows');
@@ -389,11 +424,7 @@ app.addEventListener('change',event=>{
       document.querySelector('.status').textContent=`${previous}위와 ${input.value}위의 순위를 바꿨습니다.`;
     }
   }
-  if(input.name==='unscored'){
-    const settings=document.querySelector('#point-settings');
-    settings.hidden=input.checked;
-    for(const control of settings.querySelectorAll('input,button')) control.disabled=input.checked;
-  }
+  if(input.name==='unscored') syncPointFields();
   if(input.id==='stats-period' || (['stats-month','stats-day'].includes(input.id) && input.value && input.validity.valid)){
     if(input.id==='stats-period') statsPeriod=input.value;
     if(input.id==='stats-month') statsMonth=input.value;
@@ -406,6 +437,10 @@ app.addEventListener('change',event=>{
   if(input.id==='mission'){mission=Number(input.value);notice='';render();}
   if(input.id==='member'){member=input.value;notice='';render();}
 });
+function syncPointFields(){
+  const form=document.querySelector('[data-form=type]');
+  for(const input of form.querySelectorAll('[name=points]')) input.disabled=form.elements.unscored.checked;
+}
 function recordStarChange(missionName,count,message){
   data.stars={...data.stars,[member]:stars(member)+count};
   data.starAwards.push({member,mission:missionName,count,day:date()});
@@ -428,12 +463,20 @@ app.addEventListener('submit',event=>{
     save(newMembers.length?`경기 결과를 저장하고 신규 회원 ${newMembers.length}명을 등록했습니다.`:'경기 결과를 저장했습니다.');
   }
   if(form.dataset.form==='type'){
+    const type=data.types.find(item=>item.id===editingType);
     const name=fields.get('name').trim();
     const points=fields.getAll('points').map(Number);
-    if(!name || data.types.some(type=>type.name===name)) return fail('등록된 이름과 다른 게임 이름을 입력하세요.');
-    if(points.some(point=>!Number.isSafeInteger(point) || point<0)) return fail('점수는 0 이상의 정수로 입력하세요.');
-    data.types.push({id:crypto.randomUUID(),name,points});
-    save('게임 종류를 추가했습니다.');
+    const tickets=fields.getAll('ticket').map(Number);
+    const prizes=fields.getAll('buyIn').map((value,index)=>({buyIn:Number(value),ticket:tickets[index]}));
+    if(!name || data.types.some(item=>item!==type && item.name===name)) return fail('등록된 이름과 다른 게임 이름을 입력하세요.');
+    const amounts=[...points,...prizes.flatMap(item=>[item.buyIn,item.ticket])];
+    if(amounts.some(value=>!Number.isSafeInteger(value) || value<0)) return fail('점수와 프라이즈 수량은 0 이상의 정수로 입력하세요.');
+    while(points.length && points.at(-1)===0) points.pop();
+    while(prizes.length && !prizeText(prizes.at(-1))) prizes.pop();
+    if(type) Object.assign(type,{points,prizes});
+    else data.types.push({id:crypto.randomUUID(),name,points,prizes});
+    editingType='';
+    save(type?'게임 설정을 저장했습니다.':'게임 종류를 추가했습니다.');
   }
   if(form.dataset.form==='member-period'){
     const start=fields.get('start');

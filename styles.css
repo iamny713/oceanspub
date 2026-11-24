@@ -57,3 +57,6 @@ body[data-view=guest] .leader .rank{width:clamp(34px,4vw,55px);height:clamp(34px
 .bar-chart li{display:grid;grid-template-columns:minmax(0,7rem) minmax(25px,1fr) auto;gap:8px;align-items:center;font-size:13px;overflow-wrap:anywhere}
 .bar-track{background:#eaf2ed;height:12px;border-radius:8px;overflow:hidden}
 .bar-track>span{display:block;height:100%;background:#287e69;border-radius:8px}
+.prize-row{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr));gap:8px;align-items:end}
+.prize-row .pill{align-self:end;margin-bottom:8px;white-space:nowrap}
+.prize-row .field{font-size:12px}
