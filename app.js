@@ -57,6 +57,10 @@ let member = data.members[0];
 let mission = 0;
 let notice = '';
 let statsMonth = currentMonth;
+let statsDay = today;
+let statsPeriod = 'month';
+let starPageIndex = 0;
+const prizeCost = 20;
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
 const options = (items, selected) => items.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`).join('');
@@ -156,33 +160,49 @@ function bingo(){
     return `<div class="record"><strong>${esc(name)}</strong><span class="pill ${result.rows>=3?'gold':''}">${result.completed}/9칸 · ${result.rows}줄${result.completed===9?' · 전체 프라이즈':result.rows>=3?' · 3줄 프라이즈':''}</span></div>`;
   }).join('')}</section>`:''}</div></div>`;
 }
-function starPage(){
-  if(!admin){
-    const levels = Array.from({length:20},()=>[]);
-    for(const name of data.members){
-      const count = stars(name);
-      if(count>=1 && count<=20) levels[count-1].push(name);
-    }
-    return `<section class="panel"><h2>별 모으기 랭킹</h2>
-    <ol class="star-ranking" reversed start="20">${levels.reverse().map((members,index)=>`<li>
-      <span class="pill gold">★ ${20-index}개</span>
-      <div class="star-members">${members.sort((a,b)=>a.localeCompare(b,'ko')).map(name=>`<span>${esc(name)}</span>`).join('') || '<small class="muted">해당 회원 없음</small>'}</div>
-    </li>`).join('')}</ol></section>`;
+function starRanking(){
+  const levels = new Map();
+  for(const name of data.members){
+    const count = stars(name);
+    if(count<1) continue;
+    if(!levels.has(count)) levels.set(count,[]);
+    levels.get(count).push(name);
   }
+  const max = Math.max(0,...levels.keys());
+  if(!max) return '<section class="panel"><h2>별 모으기 랭킹</h2><p>아직 별을 모은 회원이 없습니다.</p></section>';
+  const pageSize = 100;
+  starPageIndex = Math.min(starPageIndex,Math.floor((max-1)/pageSize));
+  const top = max-starPageIndex*pageSize;
+  const bottom = Math.max(1,top-pageSize+1);
+  const rows = Array.from({length:top-bottom+1},(_,index)=>{
+    const count = top-index;
+    const members = levels.get(count) ?? [];
+    return `<li><span class="pill gold">★ ${count}개</span><div class="star-members">
+      ${members.sort((a,b)=>a.localeCompare(b,'ko')).map(name=>`<span>${esc(name)}</span>`).join('') || '<small class="muted">해당 회원 없음</small>'}</div></li>`;
+  });
+  return `<section class="panel"><h2>별 모으기 랭킹</h2>
+  <ol class="star-ranking" style="--rank-rows:${Math.ceil(rows.length/2)}" reversed start="${top}">${rows.join('')}</ol>
+  ${max>pageSize?`<div class="row rank-pagination"><button class="secondary" data-action="stars-prev" ${starPageIndex===0?'disabled':''}>높은 구간</button>
+  <span>★ ${top}개 ~ ${bottom}개</span><button class="secondary" data-action="stars-next" ${bottom===1?'disabled':''}>낮은 구간</button></div>`:''}</section>`;
+}
+function starPage(){
+  if(!admin) return starRanking();
   const count = stars(member);
-  const balance = `<section class="panel"><div class="row headrow"><h2>회원 별 모으기</h2><span class="pill gold">★ ${count} / 20</span></div>
+  const available = data.starMissions.filter(item=>!item.archived);
+  const balance = `<section class="panel"><div class="row headrow"><h2>회원 별 모으기</h2><span class="pill gold">★ ${count}개</span></div>
   <label class="field">회원<select id="member">${memberOptions()}</select></label>
-  <div class="stars" role="img" aria-label="별 20개 중 ${count}개">${Array.from({length:20},(_,index)=>index<count?'<span class="on">★</span>':'<span>☆</span>').join('')}</div>
-  ${admin && data.starMissions.length?`<form class="stack" data-form="award">
-    <label class="field">지급 미션<select name="reward">${options(data.starMissions.map(item=>[item.id,`${item.name} · ★ ${item.count}개`]))}</select></label>
-    <div><button class="primary" ${count===20?'disabled':''}>미션 별 지급</button></div></form>`:''}</section>`;
-  return `<div class="grid"><div>${balance}<section class="panel"><h2>별 지급 이력</h2>
-  ${data.starAwards.slice().reverse().map(item=>`<div class="record"><div><strong>${esc(item.member)} · ${esc(item.mission)}</strong><small class="muted">${esc(item.day)}</small></div><span class="pill gold">★ +${item.count}</span></div>`).join('') || '<p class="muted">기록된 미션 지급이 없습니다.</p>'}</section></div>
+  ${available.length?`<form class="stack star-form" data-form="award">
+    <div class="row"><label class="field grow">지급 미션<select name="reward">${options(available.map(item=>[item.id,item.name]))}</select></label>
+    <label class="field">지급할 별 개수<input name="count" type="number" min="1" step="1" value="1" required></label></div>
+    <div><button class="primary">미션 별 지급</button></div></form>`:'<p class="muted">지급에 사용할 미션을 먼저 등록하세요.</p>'}
+  <form class="row prize-form" data-form="redeem"><span class="grow muted">프라이즈를 지급한 뒤 별 ${prizeCost}개를 차감하세요.</span>
+  <button class="secondary" ${count<prizeCost?'disabled':''}>프라이즈 지급 · 별 ${prizeCost}개 차감</button></form></section>`;
+  return `<div class="grid"><div>${balance}<section class="panel"><h2>별 지급·차감 이력</h2>
+  ${data.starAwards.slice().reverse().map(item=>`<div class="record"><div><strong>${esc(item.member)} · ${esc(item.mission)}</strong><small class="muted">${esc(item.day)}</small></div><span class="pill ${item.count<0?'deduction':'gold'}">★ ${item.count>0?'+':''}${item.count}</span></div>`).join('') || '<p class="muted">기록된 지급이나 차감이 없습니다.</p>'}</section></div>
   <section class="panel"><h2>별 미션 등록</h2><form class="stack" data-form="star-mission">
   <label class="field">미션 이름<input name="name" maxlength="40" required></label>
-  <label class="field">지급 별 개수<input name="count" type="number" min="1" max="20" value="1" required></label>
   <div><button class="primary">별 미션 등록</button></div></form>
-  ${data.starMissions.map(item=>`<div class="record"><strong>${esc(item.name)}</strong><span class="pill gold">★ ${item.count}개</span></div>`).join('')}</section></div>`;
+  ${available.map(item=>`<div class="record"><strong>${esc(item.name)}</strong><button class="secondary" data-action="delete-star-mission" data-id="${esc(item.id)}" aria-label="${esc(item.name)} 미션 삭제">삭제</button></div>`).join('')}</section></div>`;
 }
 function memberStats(games){
   const records = new Map(data.members.map(name=>[name,{games:0,wins:0,days:new Set(),last:''}]));
@@ -213,24 +233,61 @@ function members(){
     return [name,w.games,winRate(w),w.days.size,m.games,winRate(m),m.days.size,all.get(name).last || '—'];
   }))}</section>`;
 }
-function storeStats(){
-  const counts = new Map([[statsMonth,0]]);
-  for(const game of data.games){
-    const period = game.day.slice(0,7);
-    counts.set(period,(counts.get(period) ?? 0)+1);
+function shiftDate(day,amount){
+  const value = new Date(day+'T12:00:00+09:00');
+  value.setUTCDate(value.getUTCDate()+amount);
+  return date(value);
+}
+function statsRange(){
+  if(statsPeriod==='day') return [statsDay,statsDay];
+  if(statsPeriod==='week'){
+    const weekday=new Date(statsDay+'T12:00:00+09:00').getUTCDay();
+    const start=shiftDate(statsDay,-((weekday+6)%7));
+    return [start,shiftDate(start,6)];
   }
-  const monthly = memberStats(data.games.filter(game=>game.day.startsWith(statsMonth)));
-  return `<div class="grid"><section class="panel"><h2>월별 전체 게임</h2>
-  ${statTable(['월','게임 횟수'],[...counts].sort(([a],[b])=>b.localeCompare(a)))}</section>
-  <section class="panel"><h2>회원별 월간 통계</h2>
-  <label class="field">집계 월<input type="month" id="stats-month" value="${statsMonth}"></label>
-  <p class="muted">방문 일수는 같은 날 여러 게임에 참가해도 1일로 계산합니다.</p>
-  ${statTable(['회원','게임 횟수','방문 일수'],[...monthly].sort(([,a],[,b])=>b.games-a.games).map(([name,record])=>[name,record.games,record.days.size]))}</section></div>`;
+  const [year,monthNumber]=statsMonth.split('-').map(Number);
+  const lastDay=new Date(Date.UTC(year,monthNumber,0)).getUTCDate();
+  return [statsMonth+'-01',statsMonth+'-'+lastDay];
+}
+function barChart(rows,unit){
+  const max=Math.max(1,...rows.map(([,value])=>value));
+  return `<ul class="bar-chart">${rows.map(([label,value])=>`<li><span>${esc(label)}</span>
+  <span class="bar-track" aria-hidden="true"><span style="width:${value/max*100}%"></span></span>
+  <strong>${value}${unit}</strong></li>`).join('')}</ul>`;
+}
+function storeStats(){
+  const [start,end]=statsRange();
+  const selected=data.games.filter(game=>game.day>=start && game.day<=end);
+  const types=new Map(data.types.map(type=>[type.name,0]));
+  const daily=new Map();
+  const months=new Map();
+  for(let day=start;day<=end;day=shiftDate(day,1)) daily.set(day,0);
+  for(const game of selected){
+    types.set(game.type,(types.get(game.type) ?? 0)+1);
+    daily.set(game.day,daily.get(game.day)+1);
+  }
+  for(const game of data.games){
+    const month=game.day.slice(0,7);
+    months.set(month,(months.get(month) ?? 0)+1);
+  }
+  const records=[...memberStats(selected)].sort(([,a],[,b])=>b.games-a.games);
+  const active=records.filter(([,record])=>record.games>0);
+  return `<section class="panel"><div class="row headrow"><h2>조회 기간</h2><span class="pill">${start}${start===end?'':' ~ '+end}</span></div>
+  <div class="row"><label class="field">집계 단위<select id="stats-period">${options([['month','월간'],['week','주간'],['day','일간']],statsPeriod)}</select></label>
+  ${statsPeriod==='month'?`<label class="field">집계 월<input type="month" id="stats-month" min="1000-01" max="9998-12" value="${statsMonth}"></label>`:
+  `<label class="field">${statsPeriod==='week'?'해당 주의 날짜':'조회 날짜'}<input type="date" id="stats-day" min="1000-01-01" max="9998-12-31" value="${statsDay}"></label>`}</div>
+  <div class="stat-cards"><div>전체 게임<strong>${selected.length}회</strong></div><div>참가 회원<strong>${active.length}명</strong></div><div>게임 진행일<strong>${[...daily.values()].filter(Boolean).length}일</strong></div></div></section>
+  <div class="grid stats-grid"><section class="panel"><h2>게임 종류별 횟수</h2>${barChart([...types].sort(([,a],[,b])=>b-a),'회')}</section>
+  <section class="panel"><h2>날짜별 경기 추이</h2>${barChart([...daily].map(([day,count])=>[day.slice(5),count]),'회')}</section>
+  <section class="panel"><h2>회원별 게임 참가</h2>${active.length?barChart(active.map(([name,record])=>[name,record.games]),'회'):'<p class="muted">이 기간에 참가 회원이 없습니다.</p>'}</section>
+  <section class="panel"><h2>회원별 방문 일수</h2>${active.length?barChart(active.map(([name,record])=>[name,record.days.size]).sort(([,a],[,b])=>b-a),'일'):'<p class="muted">이 기간에 방문 기록이 없습니다.</p>'}</section></div>
+  <section class="panel"><h2>회원별 상세 통계</h2>${statTable(['회원','게임 횟수','승률','방문 일수'],records.map(([name,record])=>[name,record.games,winRate(record),record.days.size]))}</section>
+  <details class="panel"><summary>월별 전체 게임 기록</summary>${statTable(['월','게임 횟수'],[...months].sort(([a],[b])=>b.localeCompare(a)))}</details>`;
 }
 function render(){
   const menu = `<nav aria-label="화면 메뉴">${tabs.map(([id,label])=>`<button data-tab="${id}" ${id===tab?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
   const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':'HOLD’EM PUB'}</small></div></div>`;
-  const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','월별 경기와 회원별 활동을 확인하세요.']}:
+  const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','기간별 경기와 회원별 활동을 확인하세요.']}:
     {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
   const switcher = admin ? '<a class="switch" href="guest.html">손님 화면 보기 ↗</a>' :
     `<button class="switch fullscreen" type="button" data-action="fullscreen" ${document.fullscreenEnabled?'':'hidden'}>${document.fullscreenElement?'전체 화면 종료':'전체 화면'}</button>`;
@@ -259,6 +316,15 @@ app.addEventListener('click',event=>{
     document.querySelector('[aria-current=page]').focus();
   }
   const action = button.dataset.action;
+  if(action==='stars-prev' || action==='stars-next'){
+    starPageIndex += action==='stars-prev'?-1:1;
+    render();
+  }
+  if(action==='delete-star-mission'){
+    const missionToDelete=data.starMissions.find(item=>item.id===button.dataset.id);
+    missionToDelete.archived=true;
+    save('별 미션을 삭제했습니다. 기존 지급 이력은 유지됩니다.');
+  }
   if(action==='fullscreen'){
     const toggle = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
     toggle.catch(()=>{document.querySelector('.status').textContent='이 브라우저에서 전체 화면을 열 수 없습니다.';});
@@ -310,12 +376,23 @@ app.addEventListener('change',event=>{
     settings.hidden=input.checked;
     for(const control of settings.querySelectorAll('input,button')) control.disabled=input.checked;
   }
-  if(input.id==='stats-month' && input.value){statsMonth=input.value;render();document.querySelector('#stats-month').focus();}
+  if(input.id==='stats-period' || (['stats-month','stats-day'].includes(input.id) && input.value && input.validity.valid)){
+    if(input.id==='stats-period') statsPeriod=input.value;
+    if(input.id==='stats-month') statsMonth=input.value;
+    if(input.id==='stats-day') statsDay=input.value;
+    render();
+    document.getElementById(input.id).focus();
+  }
 
   if(input.id==='month' && input.value){month=input.value;mission=0;notice='';render();}
   if(input.id==='mission'){mission=Number(input.value);notice='';render();}
   if(input.id==='member'){member=input.value;notice='';render();}
 });
+function recordStarChange(missionName,count,message){
+  data.stars={...data.stars,[member]:stars(member)+count};
+  data.starAwards.push({member,mission:missionName,count,day:date()});
+  save(message);
+}
 app.addEventListener('submit',event=>{
   event.preventDefault();
   const form=event.target;
@@ -342,20 +419,20 @@ app.addEventListener('submit',event=>{
   }
   if(form.dataset.form==='star-mission'){
     const name=fields.get('name').trim();
-    const count=Number(fields.get('count'));
-    if(!name || data.starMissions.some(item=>item.name===name)) return fail('등록된 미션과 다른 이름을 입력하세요.');
-    if(!Number.isInteger(count) || count<1 || count>20) return fail('별은 1~20개 사이로 입력하세요.');
-    data.starMissions.push({id:crypto.randomUUID(),name,count});
+    if(!name || data.starMissions.some(item=>!item.archived && item.name===name)) return fail('등록된 미션과 다른 이름을 입력하세요.');
+    data.starMissions.push({id:crypto.randomUUID(),name});
     save('별 지급 미션을 등록했습니다.');
   }
   if(form.dataset.form==='award'){
-    const reward=data.starMissions.find(item=>item.id===fields.get('reward'));
+    const reward=data.starMissions.find(item=>!item.archived && item.id===fields.get('reward'));
     if(!reward) return fail('지급 미션을 선택하세요.');
-    const balance=stars(member)+reward.count;
-    if(balance>20) return fail(`현재 별 ${stars(member)}개입니다. 이 미션을 지급하면 20개를 초과합니다.`);
-    data.stars={...data.stars,[member]:balance};
-    data.starAwards.push({member,mission:reward.name,count:reward.count,day:date()});
-    save(`${member} 회원에게 ${reward.name} 미션으로 별 ${reward.count}개를 지급했습니다.`);
+    const count=Number(fields.get('count'));
+    if(!Number.isSafeInteger(count) || count<1 || !Number.isSafeInteger(stars(member)+count)) return fail('별 개수는 계산 가능한 양의 정수로 입력하세요.');
+    recordStarChange(reward.name,count,`${member} 회원에게 ${reward.name} 미션으로 별 ${count}개를 지급했습니다.`);
+  }
+  if(form.dataset.form==='redeem'){
+    if(stars(member)<prizeCost) return fail(`별이 ${prizeCost}개 이상 있어야 차감할 수 있습니다.`);
+    recordStarChange('프라이즈 지급',-prizeCost,`${member} 회원의 별 ${prizeCost}개를 차감했습니다.`);
   }
   if(form.dataset.form==='board'){
     const labels=fields.getAll('mission').map(label=>label.trim());
