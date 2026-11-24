@@ -4,10 +4,7 @@ const app = document.querySelector('#app');
 const date = (value = new Date()) => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(value);
 const today = date();
 const currentMonth = today.slice(0,7);
-const monday = new Date(today + 'T12:00:00+09:00');
-monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
-const sunday = new Date(+monday + 6 * 86400000);
-const week = [date(monday), date(sunday)];
+const week = weekRange(today);
 const names = ['산체스','유로','노유킹','나옹이','형동이','명찬이','예진이'];
 const gameTypes = [
   {id:'first',name:'첫 게임',points:[]},
@@ -57,15 +54,21 @@ function load(){
     const saved = JSON.parse(localStorage.getItem(key)) ?? structuredClone(demo);
     saved.starMissions ??= [];
     saved.starAwards ??= [];
+    saved.monthlyMissions ??= {};
+    saved.prizePayments ??= [];
     return saved;
   }
-  catch { return {...structuredClone(demo),starMissions:[],starAwards:[]}; }
+  catch { return {...structuredClone(demo),starMissions:[],starAwards:[],monthlyMissions:{},prizePayments:[]}; }
 }
 let data = load();
-const tabs = admin ? [['games','게임 결과'],['types','게임 종류'],['bingo','월간 빙고'],['stars','회원 별 관리'],['members','회원 관리'],['stats','매장 통계']] :
-  [['ranking','주간 랭킹'],['bingo','월간 빙고'],['stars','회원 별']];
+const tabs = admin ? [['games','게임 결과'],['types','게임 종류'],['bingo','월간 빙고'],['monthly','월간 미션'],['payouts','프라이즈 지급'],['stars','회원 별 관리'],['members','회원 관리'],['stats','매장 통계']] :
+  [['ranking','주간 랭킹'],['bingo','월간 빙고'],['monthly','월간 미션'],['stars','회원 별']];
 let tab = tabs.some(([id])=>id===location.hash.slice(1)) ? location.hash.slice(1) : tabs[0][0];
 let month = currentMonth;
+let missionMonth = currentMonth;
+let prizeMonth = currentMonth;
+let prizeWeekDay = today;
+const missionMilestones = [1,4,5];
 let member = data.members[0];
 let mission = 0;
 let notice = '';
@@ -91,9 +94,9 @@ function save(message){
   notice = message;
   render();
 }
-function ranking(){
+function ranking(period=week){
   const totals = new Map();
-  for(const game of data.games.filter(game=>game.day>=week[0] && game.day<=week[1])){
+  for(const game of data.games.filter(game=>game.day>=period[0] && game.day<=period[1])){
     for(const result of game.results){
       if(result.points>0) totals.set(result.name,(totals.get(result.name) ?? 0) + result.points);
     }
@@ -182,6 +185,86 @@ function bingo(){
     const result=progress(entry,name);
     return `<div class="record"><strong>${esc(name)}</strong><span class="pill ${result.rows>=3?'gold':''}">${result.completed}/9칸 · ${result.rows}줄${result.completed===9?' · 전체 프라이즈':result.rows>=3?' · 3줄 프라이즈':''}</span></div>`;
   }).join('')}</section>`:''}</div></div>`;
+}
+function monthlyPage(){
+  const entry=data.monthlyMissions[missionMonth];
+  const picker=`<label class="field">기준 월<input type="month" id="mission-month" value="${esc(missionMonth)}"></label>`;
+  const cards=entry?.items.map((item,index)=>item.name?`<article class="panel mission-card">
+    <div class="row headrow"><h2>${esc(item.name)}</h2><span class="pill">${item.done.length}명</span></div>
+    ${admin?`<form class="row" data-form="monthly-done">
+      <input type="hidden" name="index" value="${index}">
+      <label class="field grow">달성 회원<select name="member">${memberOptions()}</select></label><button class="primary">달성 등록</button>
+    </form>`:''}
+    <ul class="nickname-list" aria-label="달성 회원">${item.done.map(name=>`<li>${esc(name)}${admin?`
+      <button type="button" class="secondary nickname-remove" data-action="monthly-undo" data-index="${index}" data-name="${esc(name)}" aria-label="${esc(name)} 달성 취소">×</button>`:''}</li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul></article>`:'').join('') ?? '';
+  const prizes=entry?`<div class="row">${missionMilestones.map(count=>`<span class="pill gold">${count}개 · ${esc(entry.prizes[count]) || '프라이즈 미정'}</span>`).join('')}</div>`:'';
+  if(!admin) return `<section class="panel"><div class="row headrow">${picker}${prizes}</div>
+    ${cards?`<div class="mission-grid">${cards}</div>`:'<p class="muted">이 달에 등록된 미션이 없습니다.</p>'}</section>`;
+  return `<div class="grid"><section class="panel"><h2>월별 미션 설정</h2>${picker}
+    <form class="stack monthly-settings" data-form="monthly-settings">
+    <span class="muted">최대 5개까지 등록할 수 있습니다. 미션 이름을 바꾸면 그 칸의 달성 기록이 초기화됩니다.</span>
+    ${Array.from({length:5},(_,index)=>`<label class="field">미션 ${index+1}<input name="mission" value="${esc(entry?.items[index]?.name)}" maxlength="40"></label>`).join('')}
+    ${missionMilestones.map(count=>`<label class="field">${count}개 달성 프라이즈<input name="prize-${count}" value="${esc(entry?.prizes[count])}" maxlength="50"></label>`).join('')}
+    <div><button class="primary">월간 미션 저장</button></div></form></section>
+    <div>${cards || '<section class="panel">먼저 이 달의 미션을 저장하세요.</section>'}</div></div>`;
+}
+const payoutLabels = {weekly:'주간 랭킹',monthly:'월간 미션',bingo:'월간 빙고',stars:'별 모으기'};
+function pendingPrizes(){
+  const period=weekRange(prizeWeekDay);
+  const paid=new Set(data.prizePayments.map(item=>item.id));
+  const candidates=[];
+  const add=(category,name,periodKey,tier,label,reward='')=>{
+    const id=JSON.stringify([category,periodKey,name,tier]);
+    if(!paid.has(id)) candidates.push({id,category,name,period:periodKey,label,reward});
+  };
+  for(const {name,rank} of ranking(period)){
+    if(rank<=5) add('weekly',name,period[0],'rank',`${rank}위`);
+  }
+  const monthly=data.monthlyMissions[prizeMonth];
+  const bingo=data.boards[prizeMonth];
+  for(const name of data.members){
+    if(monthly){
+      const count=monthly.items.filter(item=>item.name && item.done.includes(name)).length;
+      for(const milestone of missionMilestones){
+        if(count>=milestone) add('monthly',name,prizeMonth,milestone,`${milestone}개 달성`,monthly.prizes[milestone]);
+      }
+    }
+    if(bingo){
+      const result=progress(bingo,name);
+      if(result.rows>=3) add('bingo',name,prizeMonth,'three','3줄 달성',bingo.three);
+      if(result.completed===9) add('bingo',name,prizeMonth,'full','올빙고 달성',bingo.full);
+    }
+    if(stars(name)>=prizeCost){
+      const id=`stars:${encodeURIComponent(name)}`;
+      candidates.push({id,category:'stars',name,period:'',label:`별 ${prizeCost}개 달성 · 보유 ${stars(name)}개`,reward:`별 ${prizeCost}개 차감`});
+    }
+  }
+  return candidates;
+}
+function payoutPage(){
+  const pending=pendingPrizes();
+  const period=weekRange(prizeWeekDay);
+  return `<section class="panel"><div class="row headrow"><h2>지급 대기</h2><span class="pill">${pending.length}건</span></div>
+    <div class="row">
+      <label class="field">주간 랭킹 기준일<input type="date" id="prize-week" min="1000-01-01" max="9998-12-31" value="${esc(prizeWeekDay)}"></label>
+      <span class="muted">${period.join(' ~ ')}</span>
+      <label class="field">미션·빙고 기준 월<input type="month" id="prize-month" value="${esc(prizeMonth)}"></label>
+    </div></section>
+    <div class="grid">${Object.entries(payoutLabels).map(([category,label])=>`<section class="panel"><h2>${label}</h2>
+    ${pending.filter(item=>item.category===category).map(item=>`<div class="record"><div><strong>${esc(item.name)} · ${esc(item.label)}</strong>
+      ${item.reward?`<small class="muted">${esc(item.reward)}</small>`:''}</div><button class="primary" data-action="pay-prize" data-id="${esc(item.id)}" aria-label="${esc(item.name+' '+label+' '+item.label)} 지급">지급</button></div>`).join('') || '<p class="muted">지급 대상이 없습니다.</p>'}</section>`).join('')}</div>
+    <section class="panel"><h2>전체 지급 이력</h2>${data.prizePayments.length ? statTable(['회원','구분','달성 기준','프라이즈','기준 기간','지급일'],
+      data.prizePayments.slice().reverse().map(item=>[item.name,payoutLabels[item.category],item.label,item.reward || '—',item.period || '—',item.day]))
+      : '<p class="muted">지급 이력이 없습니다.</p>'}</section>`;
+}
+function payPrize(item){
+  if(item.category==='stars'){
+    data.stars={...data.stars,[item.name]:stars(item.name)-prizeCost};
+    data.starAwards.push({member:item.name,mission:'프라이즈 지급',count:-prizeCost,day:date()});
+    item={...item,id:crypto.randomUUID(),label:`별 ${prizeCost}개 달성`};
+  }
+  data.prizePayments.push({...item,day:date()});
+  save(`${item.name} 회원의 ${payoutLabels[item.category]} 프라이즈 지급을 기록했습니다.`);
 }
 function starRanking(){
   const levels = new Map();
@@ -278,13 +361,14 @@ function shiftDate(day,amount){
   value.setUTCDate(value.getUTCDate()+amount);
   return date(value);
 }
+function weekRange(day){
+  const weekday=new Date(day+'T12:00:00+09:00').getUTCDay();
+  const start=shiftDate(day,-((weekday+6)%7));
+  return [start,shiftDate(start,6)];
+}
 function statsRange(){
   if(statsPeriod==='day') return [statsDay,statsDay];
-  if(statsPeriod==='week'){
-    const weekday=new Date(statsDay+'T12:00:00+09:00').getUTCDay();
-    const start=shiftDate(statsDay,-((weekday+6)%7));
-    return [start,shiftDate(start,6)];
-  }
+  if(statsPeriod==='week') return weekRange(statsDay);
   return monthRange(statsMonth);
 }
 function barChart(rows,unit){
@@ -325,13 +409,13 @@ function storeStats(){
 function render(){
   const menu = `<nav aria-label="화면 메뉴">${tabs.map(([id,label])=>`<button data-tab="${id}" ${id===tab?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
   const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':'HOLD’EM PUB'}</small></div></div>`;
-  const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','기간별 경기와 회원별 활동을 확인하세요.']}:
-    {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
+  const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],monthly:['월간 미션','월별 미션을 등록하고 회원별 달성을 기록하세요.'],payouts:['프라이즈 지급','지급 대상을 확인하고 프라이즈 지급을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','기간별 경기와 회원별 활동을 확인하세요.']}:
+    {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],monthly:['월간 미션','이번 달 미션과 달성 회원을 확인하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
   const switcher = admin ? '<a class="switch" href="guest.html">손님 화면 보기 ↗</a>' :
     `<button class="switch fullscreen" type="button" data-action="fullscreen" ${document.fullscreenEnabled?'':'hidden'}>${document.fullscreenElement?'전체 화면 종료':'전체 화면'}</button>`;
   const main = `<main class="${!admin && tab==='bingo'?'bingo-main':''}"><div class="hero"><div class="eyebrow">${admin?'오션스펍 매장 관리':'오션스펍'}</div><h1>${heading[tab][0]}</h1><p>${heading[tab][1]}</p></div>
   <p class="status" role="status">${esc(notice)}</p>
-  ${({games,types,bingo,stars:starPage,ranking:leaderboard,members,stats:storeStats})[tab]()}</main>`;
+  ${({games,types,bingo,stars:starPage,ranking:leaderboard,monthly:monthlyPage,payouts:payoutPage,members,stats:storeStats})[tab]()}</main>`;
   app.innerHTML = admin?`<div class="shell"><aside class="sidebar">${brand}${menu}${switcher}</aside>${main}</div>`:
     `<header class="guestbar"><div>${brand}${menu}${switcher}</div></header>${main}`;
   showScoring();
@@ -356,6 +440,17 @@ app.addEventListener('click',event=>{
     document.querySelector('[aria-current=page]').focus();
   }
   const action = button.dataset.action;
+  if(action==='pay-prize'){
+    data=load();
+    const item=pendingPrizes().find(candidate=>candidate.id===button.dataset.id);
+    if(item) payPrize(item);
+    else {notice='이미 지급했거나 지급 대상이 바뀌었습니다.';render();}
+  }
+  if(action==='monthly-undo'){
+    const item=data.monthlyMissions[missionMonth].items[Number(button.dataset.index)];
+    item.done=item.done.filter(name=>name!==button.dataset.name);
+    save('월간 미션 달성 기록을 취소했습니다.');
+  }
   if(action==='member-week' || action==='member-month'){
     memberRange=action==='member-week' ? week : monthRange(currentMonth);
     notice='';
@@ -433,6 +528,14 @@ app.addEventListener('change',event=>{
     document.getElementById(input.id).focus();
   }
 
+  if(['mission-month','prize-month','prize-week'].includes(input.id) && input.value && input.validity.valid){
+    if(input.id==='mission-month') missionMonth=input.value;
+    if(input.id==='prize-month') prizeMonth=input.value;
+    if(input.id==='prize-week') prizeWeekDay=input.value;
+    notice='';
+    render();
+    document.getElementById(input.id).focus();
+  }
   if(input.id==='month' && input.value){month=input.value;mission=0;notice='';render();}
   if(input.id==='mission'){mission=Number(input.value);notice='';render();}
   if(input.id==='member'){member=input.value;notice='';render();}
@@ -501,8 +604,29 @@ app.addEventListener('submit',event=>{
     recordStarChange(reward.name,count,`${member} 회원에게 ${reward.name} 미션으로 별 ${count}개를 지급했습니다.`);
   }
   if(form.dataset.form==='redeem'){
-    if(stars(member)<prizeCost) return fail(`별이 ${prizeCost}개 이상 있어야 차감할 수 있습니다.`);
-    recordStarChange('프라이즈 지급',-prizeCost,`${member} 회원의 별 ${prizeCost}개를 차감했습니다.`);
+    data=load();
+    const item=pendingPrizes().find(candidate=>candidate.category==='stars' && candidate.name===member);
+    if(!item) return fail(`별이 ${prizeCost}개 이상 있어야 차감할 수 있습니다.`);
+    payPrize(item);
+  }
+  if(form.dataset.form==='monthly-settings'){
+    const labels=fields.getAll('mission').map(label=>label.trim());
+    const filled=labels.filter(Boolean);
+    if(!filled.length || new Set(filled).size!==filled.length) return fail('서로 다른 미션을 1~5개 입력하세요.');
+    const previous=data.monthlyMissions[missionMonth];
+    const items=labels.map((name,index)=>({name,done:name && name===previous?.items[index]?.name ? previous.items[index].done : []}));
+    const prizes=Object.fromEntries(missionMilestones.map(count=>[count,fields.get('prize-'+count).trim()]));
+    data.monthlyMissions[missionMonth]={items,prizes};
+    save('월간 미션을 저장했습니다.');
+  }
+  if(form.dataset.form==='monthly-done'){
+    const name=fields.get('member');
+    const item=data.monthlyMissions[missionMonth].items[Number(fields.get('index'))];
+    if(!item?.name || !data.members.includes(name)) return fail('미션과 회원을 선택하세요.');
+    if(item.done.includes(name)) return fail('이미 달성으로 기록된 회원입니다.');
+    item.done.push(name);
+    member=name;
+    save(`${name} 회원의 월간 미션 달성을 기록했습니다.`);
   }
   if(form.dataset.form==='board'){
     const labels=fields.getAll('mission').map(label=>label.trim());
