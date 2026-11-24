@@ -56,6 +56,7 @@ let month = currentMonth;
 let member = data.members[0];
 let mission = 0;
 let notice = '';
+let memberRange = monthRange(currentMonth);
 let statsMonth = currentMonth;
 let statsDay = today;
 let statsPeriod = 'month';
@@ -205,11 +206,12 @@ function starPage(){
   ${available.map(item=>`<div class="record"><strong>${esc(item.name)}</strong><button class="secondary" data-action="delete-star-mission" data-id="${esc(item.id)}" aria-label="${esc(item.name)} 미션 삭제">삭제</button></div>`).join('')}</section></div>`;
 }
 function memberStats(games){
-  const records = new Map(data.members.map(name=>[name,{games:0,wins:0,days:new Set(),last:''}]));
+  const records = new Map(data.members.map(name=>[name,{games:0,wins:0,finishTotal:0,days:new Set(),last:''}]));
   for(const game of games){
     for(const result of game.results){
       const stats = records.get(result.name);
       stats.games++;
+      stats.finishTotal += result.rank / game.results.length;
       if(result.rank===1) stats.wins++;
       stats.days.add(game.day);
       if(game.day>stats.last) stats.last=game.day;
@@ -223,15 +225,27 @@ function statTable(headers,rows){
 }
 const winRate = record => record.games ? `${(record.wins / record.games * 100).toFixed(1)}%` : '—';
 function members(){
-  const weekly = memberStats(data.games.filter(game=>game.day>=week[0] && game.day<=week[1]));
-  const monthly = memberStats(data.games.filter(game=>game.day.startsWith(currentMonth)));
+  const [start,end] = memberRange;
+  const selected = memberStats(data.games.filter(game=>game.day>=start && game.day<=end));
   const all = memberStats(data.games);
-  return `<section class="panel"><div class="row headrow"><h2>전체 회원</h2><span class="pill">${data.members.length}명</span></div>
-  <p class="muted">이번 주 ${week.join(' ~ ')} · 이번 달 ${currentMonth}<br>승률은 1위 횟수 ÷ 참가 게임 수이며, 방문은 경기 기록이 있는 날짜를 기준으로 집계합니다.</p>
-  ${statTable(['회원','주간 참가','주간 승률','주간 방문','월간 참가','월간 승률','월간 방문','마지막 방문'],data.members.map(name=>{
-    const w=weekly.get(name), m=monthly.get(name);
-    return [name,w.games,winRate(w),w.days.size,m.games,winRate(m),m.days.size,all.get(name).last || '—'];
+  return `<section class="panel"><h2>회원 통계 조회</h2><form class="row" data-form="member-period">
+  <button class="secondary" type="button" data-action="member-week">이번 주</button>
+  <button class="secondary" type="button" data-action="member-month">이번 달</button>
+  <label class="field">시작일<input type="date" name="start" value="${esc(start)}" required></label>
+  <label class="field">종료일<input type="date" name="end" value="${esc(end)}" required></label>
+  <button class="primary" type="submit">조회</button></form></section>
+  <section class="panel"><div class="row headrow"><h2>전체 회원</h2><span class="pill">${esc(start)} ~ ${esc(end)} · ${data.members.length}명</span></div>
+  <p class="muted">상위 비율은 경기별 순위 ÷ 기록된 참가자 수의 평균입니다. 숫자가 작을수록 성적이 높습니다.<br>승률은 1위 횟수 ÷ 참가 게임 수이며, 같은 날 여러 게임에 참가해도 방문은 1일로 집계합니다.</p>
+  ${statTable(['회원','참가 횟수','승률','평균 상위 비율','방문 일수','마지막 방문일 (전체 기간)'],data.members.map(name=>{
+    const record=selected.get(name);
+    const finish=record.games ? `상위 ${(record.finishTotal / record.games * 100).toFixed(1)}%` : '—';
+    return [name,record.games,winRate(record),finish,record.days.size,all.get(name).last || '—'];
   }))}</section>`;
+}
+function monthRange(month){
+  const [year,monthNumber]=month.split('-').map(Number);
+  const lastDay=new Date(Date.UTC(year,monthNumber,0)).getUTCDate();
+  return [month+'-01',month+'-'+lastDay];
 }
 function shiftDate(day,amount){
   const value = new Date(day+'T12:00:00+09:00');
@@ -245,9 +259,7 @@ function statsRange(){
     const start=shiftDate(statsDay,-((weekday+6)%7));
     return [start,shiftDate(start,6)];
   }
-  const [year,monthNumber]=statsMonth.split('-').map(Number);
-  const lastDay=new Date(Date.UTC(year,monthNumber,0)).getUTCDate();
-  return [statsMonth+'-01',statsMonth+'-'+lastDay];
+  return monthRange(statsMonth);
 }
 function barChart(rows,unit){
   const max=Math.max(1,...rows.map(([,value])=>value));
@@ -316,6 +328,12 @@ app.addEventListener('click',event=>{
     document.querySelector('[aria-current=page]').focus();
   }
   const action = button.dataset.action;
+  if(action==='member-week' || action==='member-month'){
+    memberRange=action==='member-week' ? week : monthRange(currentMonth);
+    notice='';
+    render();
+    document.querySelector(`[data-action="${action}"]`).focus();
+  }
   if(action==='stars-prev' || action==='stars-next'){
     starPageIndex += action==='stars-prev'?-1:1;
     render();
@@ -416,6 +434,15 @@ app.addEventListener('submit',event=>{
     if(points.some(point=>!Number.isSafeInteger(point) || point<0)) return fail('점수는 0 이상의 정수로 입력하세요.');
     data.types.push({id:crypto.randomUUID(),name,points});
     save('게임 종류를 추가했습니다.');
+  }
+  if(form.dataset.form==='member-period'){
+    const start=fields.get('start');
+    const end=fields.get('end');
+    if(start>end) return fail('종료일은 시작일과 같거나 그 이후여야 합니다.');
+    memberRange=[start,end];
+    notice='';
+    render();
+    document.querySelector('[data-form=member-period] button[type=submit]').focus();
   }
   if(form.dataset.form==='star-mission'){
     const name=fields.get('name').trim();
