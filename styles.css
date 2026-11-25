@@ -99,3 +99,22 @@ body[data-view=guest] .hero{background:linear-gradient(105deg,#a84918,#a0175a)}
 @media(min-width:951px) and (max-width:1240px){
   .guest-display-stars .star-ranking{display:block}
 }
+.guest-guide{color:#30252a}
+.guest-guide h2{font-size:clamp(21px,1.65vw,28px);line-height:1.2;margin:0 0 12px}
+.guest-guide h2:not(:first-child){margin-top:22px}
+.guide-rewards{display:grid;gap:7px;margin:0}
+.guide-rewards>div{display:grid;grid-template-columns:minmax(5.5rem,max-content) minmax(0,1fr);align-items:center;gap:10px;padding:10px 12px;border-radius:9px;background:#f8e4b7}
+.guide-rewards dt{font-weight:750;color:#78440b;font-size:14px}
+.guide-rewards dd{margin:0;font-size:clamp(16px,1.4vw,23px);font-weight:850;line-height:1.25;overflow-wrap:anywhere}
+.guest-guide .guide-callout,.guest-guide .guide-note{font-size:14px;line-height:1.45;margin:10px 0}
+.guest-guide .guide-callout{border-left:3px solid #a84b70;background:#faeef2;padding:9px 11px}
+.guide-rules{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:9px 12px;margin:0;font-size:15px;line-height:1.42}
+.guide-rules dt{font-weight:800;color:#843752}.guide-rules dd{margin:0}
+.guest-guide th,.guest-guide td{padding:8px 5px;line-height:1.25}
+.guest-guide th:not(:first-child),.guest-guide td{text-align:center}
+.guest-guide td{font-weight:750;font-variant-numeric:tabular-nums}
+@media(max-width:480px){
+ .guest-guide{padding:14px}
+ .guest-guide table{font-size:12px}
+ .guest-guide th:first-child{min-width:4rem}
+}

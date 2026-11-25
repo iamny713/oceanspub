@@ -504,44 +504,53 @@ function storeStats(){
   <section class="panel"><h2>회원별 상세 통계</h2>${statTable(['회원','게임 횟수','승률','방문 일수'],records.map(([name,record])=>[name,record.games,winRate(record),record.days.size]))}</section>
   <details class="panel"><summary>월별 전체 게임 기록</summary>${statTable(['월','게임 횟수'],[...months].sort(([a],[b])=>b.localeCompare(a)))}</details>`;
 }
+function guideRewards(rows){
+  return `<dl class="guide-rewards">${rows.map(([condition,reward])=>`<div><dt>${esc(condition)}</dt><dd>${esc(reward)}</dd></div>`).join('')}</dl>`;
+}
 function guestGuide(){
-  if(tab==='ranking'){
-    const firstGame='1주 동안 언제 방문해도 첫 게임 무료 바이인';
-    return `<aside class="panel guest-guide" aria-label="주간 랭킹 매장 안내"><h2>매장 랭크 포인트</h2>
-    ${statTable(['게임','순위별 점수'],[
-      ['데일리','1위 +2 · 2위 +1 · 10위 −1'],
-      ['딥랭크','1위 +5 · 2위 +3 · 10위 −1'],
-      ['랭크게임','1위 +4 · 2위 +2 · 10위 −1'],
-      ['OMTT (수·일)','1위 +6 · 2위 +4 · 3위 +2']
+  if(tab==='ranking') return `<aside class="panel guest-guide" aria-label="주간 랭킹 매장 안내">
+    <h2>주간 랭킹 보상</h2>
+    <p class="guide-callout">1~3위는 일주일 동안 방문할 때마다 <strong>첫 게임 바이인 무료</strong></p>
+    ${guideRewards([['1위 추가','미니 MTT 첫 바이인 무료 2회'],['2위 추가','미니 MTT 첫 바이인 무료 1회'],['4위','매장이용권 4장'],['5위','매장이용권 2장']])}
+    <h2>게임별 랭킹 점수</h2>
+    ${statTable(['게임','1위','2위','3위','10위'],[
+      ['데일리','+2','+1','—','−1'],
+      ['딥랭크','+5','+3','—','−1'],
+      ['랭크게임','+4','+2','—','−1'],
+      ['OMTT (수·일)','+6','+4','+2','—']
     ])}
-    <p class="muted">매장 안내 기준입니다. 목업 랭킹은 저장된 경기 배점으로 집계됩니다.</p>
-    <h2>주간 랭크 보상</h2>
-    ${statTable(['순위','보상'],[
-      ['1위','미니 MTT 2회 첫 바이인 무료 + '+firstGame],
-      ['2위','미니 MTT 1회 첫 바이인 무료 + '+firstGame],
-      ['3위',firstGame],['4위','오션스 매장이용권 4장'],['5위','오션스 매장이용권 2장']
-    ])}</aside>`;
-  }
-  if(tab==='stars') return `<aside class="panel guest-guide"><h2>별 획득 방법</h2>
-    ${statTable(['구분','지급 기준'],[
-      ['주간 랭킹','1위 6개 · 2위 5개 · 3위 4개 · 4위 3개 · 5위 2개 · 6~7위 1개'],
-      ['미니 MTT','1위 3개 · 2위 2개 · 3위 1개'],
-      ['데일리 다승왕','별 1개 · 공동 2명까지 인정'],
-      ['Oceans Poker League','1위 5개 · 2위 4개 · 3위 3개 · 4위 2개 · 5위 1개']
+    <p class="muted guide-note">매장 배점표입니다. 현재 목업 랭킹은 경기 기록에 저장된 점수로 집계합니다.</p></aside>`;
+  if(tab==='stars') return `<aside class="panel guest-guide">
+    <h2>별 교환 보상</h2>
+    ${guideRewards([['별 20개','매장이용권 10장']])}
+    <p class="guide-note">교환 후 다시 모을 수 있습니다.</p>
+    <h2>별을 받는 방법</h2>
+    ${statTable(['구분','1위','2위','3위','4위','5위','6~7위'],[
+      ['주간 랭킹','6','5','4','3','2','1'],
+      ['미니 MTT','3','2','1','—','—','—'],
+      ['오션스 포커 리그','5','4','3','2','1','—']
     ])}
-    <p class="guide-reward"><strong>★ 20개 → 매장이용권 10장</strong><br>교환 후 다시 모을 수 있습니다.</p></aside>`;
-  if(tab==='bingo') return `<aside class="panel guest-guide"><h2>빙고 안내</h2>
-    <ul class="guide-list"><li>데일리·랭크·딥랭크에 적용</li><li>무료 토너먼트와 헤즈업은 제외</li>
-    <li>메이드 시 핸드 오픈</li><li>모든 빙고는 투 핸드 적용</li><li>빙고를 완성하면 직원에게 알려주세요.</li></ul>
-    <p class="guide-reward"><strong>보상</strong><br>3줄 · ${esc(board()?.three ?? houseBingoPrizes.three)}<br>올빙고 · ${esc(board()?.full ?? houseBingoPrizes.full)}</p></aside>`;
-  if(tab==='monthly') {
+    <p class="guide-callout"><strong>데일리 다승왕은 별 1개.</strong> 공동 2명까지 받을 수 있습니다.</p></aside>`;
+  if(tab==='bingo') return `<aside class="panel guest-guide">
+    <h2>빙고 보상</h2>
+    ${guideRewards([
+      ['3줄 완성',board()?.three ?? houseBingoPrizes.three],
+      ['9칸 완성',board()?.full ?? houseBingoPrizes.full]
+    ])}
+    <p class="guide-callout"><strong>빙고를 달성하면 직원에게 알려주세요.</strong></p>
+    <h2>빙고가 인정되는 조건</h2>
+    <dl class="guide-rules">
+      <dt>적용 경기</dt><dd>데일리 · 랭크 · 딥랭크</dd>
+      <dt>제외 경기</dt><dd>무료 토너먼트 · 헤즈업</dd>
+      <dt>카드 조건</dt><dd>모든 미션은 내 카드 2장(투 핸드)을 적용합니다. 족보를 완성하면 카드를 공개해 주세요.</dd>
+    </dl></aside>`;
+  if(tab==='monthly'){
     const entry=monthlyEntry(missionMonth);
-    const labels=entry.items.length?entry.items.map(item=>item.name):houseMonthlyMissions;
-    return `<aside class="panel guest-guide"><h2>월간 미션 안내</h2>
-    <p class="muted">한 달 동안 미션을 달성하고 달성 개수에 따라 프라이즈를 받을 수 있습니다.</p>
-    <ol class="guide-list">${labels.map(label=>`<li>${esc(label)}</li>`).join('')}</ol>
-    <div class="guide-reward"><strong>달성 보상</strong>
-    ${missionMilestones.map(count=>`<div>${count}개 · ${esc(entry.prizes[count] || houseMonthlyPrizes[count])}</div>`).join('')}</div></aside>`;
+    return `<aside class="panel guest-guide">
+      <h2>월간 미션 보상</h2>
+      ${guideRewards(missionMilestones.map(count=>[`${count}개 달성`,entry.prizes[count] || houseMonthlyPrizes[count]]))}
+      <p class="guide-callout">이번 달에 달성한 미션만 합산합니다. <strong>4개·5개 보상은 해당 개수 이상</strong>이면 받을 수 있습니다.</p>
+    </aside>`;
   }
   return '';
 }
