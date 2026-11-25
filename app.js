@@ -50,13 +50,16 @@ function demoGame(id,participants){
 function scoringText(type){
   return type.points.map((point,index)=>`${index+1}위 ${point}점`).join(' · ') || '랭킹 점수 없음';
 }
-const missions = ['첫 게임 참가','데일리 입상','딥랭크 참가','포켓 페어로 승리','MTT 참가','쇼다운 승리','친구와 함께 방문','주간 랭킹 진입','데일리 우승'];
+const missions = ['셋 패배','오늘의 파켓 (T/T) 승리','플러쉬 vs 플러쉬 패배','오늘의 하이핸드','오션스 대회 참가','하루 2연승','미니 MTT 파이널 테이블 진출','노리바인 우승 (데일리)','주간 랭킹 승점 12점 쌓기'];
+const houseMonthlyMissions = ['하루 4게임 참여','올빙고 달성','대회 12위 이상 진출','별 10개 달성','첫 게임·막 게임 우승'];
+const houseMonthlyPrizes = {1:'매장이용권 1장',4:'매장이용권 10장',5:'매장이용권 20장'};
+const houseBingoPrizes = {three:'매장이용권 1장',full:'매장이용권 3장'};
 const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const demoMonthly = {
-  items:['데일리 입상','딥랭크 참가','첫 게임 참가','친구와 방문','MTT 참가','쇼다운 승리'].map((name,index)=>({
+  items:houseMonthlyMissions.map((name,index)=>({
     name,done:[names[0],...(index<4?[names[1]]:[]),...(index===0?[names[2]]:[])]
   })),
-  prizes:{1:'음료 1잔',4:'바인권 1개',5:'오션스 티켓 1개'}
+  prizes:houseMonthlyPrizes
 };
 function paymentId(category,period,name,tier){
   return JSON.stringify([category,period,name,tier]);
@@ -69,14 +72,14 @@ const demo = {
     demoGame('daily',[names[0],names[1],names[2]]),
     demoGame('deep',[names[5],names[0],names[6]])
   ],
-  boards:{[currentMonth]:{missions,three:'음료 1잔',full:'매장 이용권',
+  boards:{[currentMonth]:{missions,...houseBingoPrizes,
     done:missions.map((_,index)=>[names[0],...(index<5?[names[1]]:[])])}},
   stars:{[names[0]]:12,[names[1]]:24,[names[2]]:4},
   monthlyMissions:{[currentMonth]:demoMonthly},
   starAwards:[{member:names[1],mission:'프라이즈 지급',count:-20,day:today}],
   prizePayments:[
-    {id:paymentId('bingo',currentMonth,names[0],'three'),category:'bingo',name:names[0],period:currentMonth,label:'3줄 달성',reward:'음료 1잔',day:today},
-    {id:paymentId('monthly',currentMonth,names[0],1),category:'monthly',name:names[0],period:currentMonth,label:'1개 달성',reward:'음료 1잔',day:today},
+    {id:paymentId('bingo',currentMonth,names[0],'three'),category:'bingo',name:names[0],period:currentMonth,label:'3줄 달성',reward:houseBingoPrizes.three,day:today},
+    {id:paymentId('monthly',currentMonth,names[0],1),category:'monthly',name:names[0],period:currentMonth,label:'1개 달성',reward:houseMonthlyPrizes[1],day:today},
     {id:'demo-star-payment',category:'stars',name:names[1],period:'',label:'별 20개 달성',reward:'별 20개 차감',day:today}
   ]
 };
@@ -501,6 +504,47 @@ function storeStats(){
   <section class="panel"><h2>회원별 상세 통계</h2>${statTable(['회원','게임 횟수','승률','방문 일수'],records.map(([name,record])=>[name,record.games,winRate(record),record.days.size]))}</section>
   <details class="panel"><summary>월별 전체 게임 기록</summary>${statTable(['월','게임 횟수'],[...months].sort(([a],[b])=>b.localeCompare(a)))}</details>`;
 }
+function guestGuide(){
+  if(tab==='ranking'){
+    const firstGame='1주 동안 언제 방문해도 첫 게임 무료 바이인';
+    return `<aside class="panel guest-guide" aria-label="주간 랭킹 매장 안내"><h2>매장 랭크 포인트</h2>
+    ${statTable(['게임','순위별 점수'],[
+      ['데일리','1위 +2 · 2위 +1 · 10위 −1'],
+      ['딥랭크','1위 +5 · 2위 +3 · 10위 −1'],
+      ['랭크게임','1위 +4 · 2위 +2 · 10위 −1'],
+      ['OMTT (수·일)','1위 +6 · 2위 +4 · 3위 +2']
+    ])}
+    <p class="muted">매장 안내 기준입니다. 목업 랭킹은 저장된 경기 배점으로 집계됩니다.</p>
+    <h2>주간 랭크 보상</h2>
+    ${statTable(['순위','보상'],[
+      ['1위','미니 MTT 2회 첫 바이인 무료 + '+firstGame],
+      ['2위','미니 MTT 1회 첫 바이인 무료 + '+firstGame],
+      ['3위',firstGame],['4위','오션스 매장이용권 4장'],['5위','오션스 매장이용권 2장']
+    ])}</aside>`;
+  }
+  if(tab==='stars') return `<aside class="panel guest-guide"><h2>별 획득 방법</h2>
+    ${statTable(['구분','지급 기준'],[
+      ['주간 랭킹','1위 6개 · 2위 5개 · 3위 4개 · 4위 3개 · 5위 2개 · 6~7위 1개'],
+      ['미니 MTT','1위 3개 · 2위 2개 · 3위 1개'],
+      ['데일리 다승왕','별 1개 · 공동 2명까지 인정'],
+      ['Oceans Poker League','1위 5개 · 2위 4개 · 3위 3개 · 4위 2개 · 5위 1개']
+    ])}
+    <p class="guide-reward"><strong>★ 20개 → 매장이용권 10장</strong><br>교환 후 다시 모을 수 있습니다.</p></aside>`;
+  if(tab==='bingo') return `<aside class="panel guest-guide"><h2>빙고 안내</h2>
+    <ul class="guide-list"><li>데일리·랭크·딥랭크에 적용</li><li>무료 토너먼트와 헤즈업은 제외</li>
+    <li>메이드 시 핸드 오픈</li><li>모든 빙고는 투 핸드 적용</li><li>빙고를 완성하면 직원에게 알려주세요.</li></ul>
+    <p class="guide-reward"><strong>보상</strong><br>3줄 · ${esc(board()?.three ?? houseBingoPrizes.three)}<br>올빙고 · ${esc(board()?.full ?? houseBingoPrizes.full)}</p></aside>`;
+  if(tab==='monthly') {
+    const entry=monthlyEntry(missionMonth);
+    const labels=entry.items.length?entry.items.map(item=>item.name):houseMonthlyMissions;
+    return `<aside class="panel guest-guide"><h2>월간 미션 안내</h2>
+    <p class="muted">한 달 동안 미션을 달성하고 달성 개수에 따라 프라이즈를 받을 수 있습니다.</p>
+    <ol class="guide-list">${labels.map(label=>`<li>${esc(label)}</li>`).join('')}</ol>
+    <div class="guide-reward"><strong>달성 보상</strong>
+    ${missionMilestones.map(count=>`<div>${count}개 · ${esc(entry.prizes[count] || houseMonthlyPrizes[count])}</div>`).join('')}</div></aside>`;
+  }
+  return '';
+}
 function render(){
   const menu = `<nav aria-label="화면 메뉴">${tabs.map(([id,label])=>`<button data-tab="${id}" ${id===tab?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
   const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':'HOLD’EM PUB'}</small></div></div>`;
@@ -508,9 +552,10 @@ function render(){
     {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],monthly:['월간 미션','이번 달 미션과 달성 회원을 확인하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
   const switcher = admin ? `<a class="switch" href="guest.html${sampleMode?'?sample=1':''}">손님 화면 보기 ↗</a>` :
     `<button class="switch fullscreen" type="button" data-action="fullscreen" ${document.fullscreenEnabled?'':'hidden'}>${document.fullscreenElement?'전체 화면 종료':'전체 화면'}</button>`;
+  const content=({games,types,bingo,stars:starPage,ranking:leaderboard,monthly:monthlyPage,payouts:payoutPage,members,stats:storeStats})[tab]();
   const main = `<main class="${!admin && tab==='bingo'?'bingo-main':''}"><div class="hero"><div class="eyebrow">${admin?'오션스펍 매장 관리':'오션스펍'}</div><h1>${heading[tab][0]}</h1><p>${heading[tab][1]}</p></div>
   <p class="status" role="status">${esc(notice)}</p>
-  ${({games,types,bingo,stars:starPage,ranking:leaderboard,monthly:monthlyPage,payouts:payoutPage,members,stats:storeStats})[tab]()}</main>`;
+  ${admin?content:`<div class="guest-display guest-display-${tab}"><div class="guest-live">${content}</div>${guestGuide()}</div>`}</main>`;
   app.innerHTML = admin?`<div class="shell"><aside class="sidebar">${brand}${menu}${switcher}</aside>${main}</div>`:
     `<header class="guestbar"><div>${brand}${menu}${switcher}</div></header>${main}`;
   showScoring();
