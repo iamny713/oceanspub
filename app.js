@@ -176,8 +176,8 @@ function leaderboard(){
     if(!groups.has(rank)) groups.set(rank,{points,members:[]});
     groups.get(rank).members.push(name);
   }
-  const rows=!admin && pptMode?[...groups].map(([rank,{points,members}])=>`<div class="leader ppt-leader"><span class="rank">${rank}</span><strong>${members.map(esc).join(', ')}</strong><span class="score">${points}점</span></div>`):
-    results.map(({name,points,rank})=>`<div class="leader"><span class="rank">${rank}</span><strong>${esc(name)}</strong><span class="score">${points}점</span></div>`);
+  const rows=!admin && pptMode?[...groups].map(([rank,{points,members}])=>`<div class="leader ppt-leader"><span class="rank" data-rank="${rank}">${rank}위</span><strong>${members.map(esc).join(', ')}</strong><span class="score">${points}점</span></div>`):
+    results.map(({name,points,rank})=>`<div class="leader"><span class="rank" data-rank="${rank}">${rank}위</span><strong>${esc(name)}</strong><span class="score">${points}점</span></div>`);
   return `<section class="panel"><div class="row headrow"><h2>주간 랭킹</h2><span class="pill">${week[0]} ~ ${week[1]}</span></div>
   ${rows.join('') || '<p class="muted">이번 주에 점수를 획득한 회원이 없습니다.</p>'}</section>`;
 }
@@ -546,10 +546,17 @@ function guideRewards(rows){
   return `<dl class="guide-rewards">${rows.map(([condition,reward])=>`<div><dt>${esc(condition)}</dt><dd>${esc(reward)}</dd></div>`).join('')}</dl>`;
 }
 function guestGuide(){
-  if(tab==='ranking') return `<aside class="panel guest-guide" aria-label="주간 랭킹 매장 안내">
+  if(tab==='ranking'){
+    const freeFirstGame='일주일간 방문할 때마다 첫 게임 바이인 무료';
+    return `<aside class="panel guest-guide" aria-label="주간 랭킹 매장 안내">
     <h2>주간 랭킹 보상</h2>
-    <p class="guide-callout">1~3위는 일주일 동안 방문할 때마다 <strong>첫 게임 바이인 무료</strong></p>
-    ${guideRewards([['1위 추가','미니 MTT 첫 바이인 무료 2회'],['2위 추가','미니 MTT 첫 바이인 무료 1회'],['4위','매장이용권 4장'],['5위','매장이용권 2장']])}
+    ${guideRewards([
+      ['1위','미니 MTT 첫 바이인 무료 2회 + '+freeFirstGame],
+      ['2위','미니 MTT 첫 바이인 무료 1회 + '+freeFirstGame],
+      ['3위',freeFirstGame],
+      ['4위','매장이용권 4장'],
+      ['5위','매장이용권 2장']
+    ])}
     <h2>게임별 랭킹 점수</h2>
     ${statTable(['게임','1위','2위','3위','10위'],[
       ['데일리','+2','+1','—','−1'],
@@ -558,6 +565,7 @@ function guestGuide(){
       ['OMTT (수·일)','+6','+4','+2','—']
     ])}
     <p class="muted guide-note">매장 배점표입니다. 현재 목업 랭킹은 경기 기록에 저장된 점수로 집계합니다.</p></aside>`;
+  }
   if(tab==='stars') return `<aside class="panel guest-guide">
     <h2>별 교환 보상</h2>
     ${guideRewards([['별 20개','매장이용권 10장']])}
