@@ -118,3 +118,6 @@ body[data-view=guest] .hero{background:linear-gradient(105deg,#a84918,#a0175a)}
  .guest-guide table{font-size:12px}
  .guest-guide th:first-child{min-width:4rem}
 }
+body[data-view=guest] .ppt-leader{font-size:clamp(16px,2vw,27px);padding-block:10px}
+.ppt-leader strong{overflow-wrap:anywhere}
+.sample-win-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}

@@ -1,5 +1,7 @@
-const sampleMode = new URLSearchParams(location.search).get('sample') === '1';
-const key = sampleMode ? 'oceanspub-poc-prize-samples' : 'oceanspub-poc-v2';
+const sampleKind = new URLSearchParams(location.search).get('sample');
+const pptMode = sampleKind === 'ppt';
+const sampleMode = sampleKind === '1' || pptMode;
+const key = pptMode ? 'oceanspub-poc-ppt-sample-v1' : sampleMode ? 'oceanspub-poc-prize-samples' : 'oceanspub-poc-v2';
 const admin = document.body.dataset.view === 'admin';
 const app = document.querySelector('#app');
 const date = (value = new Date()) => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(value);
@@ -83,11 +85,30 @@ const demo = {
     {id:'demo-star-payment',category:'stars',name:names[1],period:'',label:'별 20개 달성',reward:'별 20개 차감',day:today}
   ]
 };
+function pptSampleData(){
+  const split=list=>list?list.split(','):[];
+  const snapshot=structuredClone(demo);
+  const bingo=pptSample.bingo.map(split);
+  const winGroups=pptSample.wins.map(([label,list])=>[label,split(list)]);
+  const monthly=[...pptSample.monthly.map(split),[...new Set(winGroups.flatMap(([,members])=>members))]];
+  const ranking=pptSample.ranking.flatMap(([score,list])=>split(list).map(name=>[name,score]));
+  const starBalances=pptSample.stars.flatMap(([count,list])=>split(list).map(name=>[name,count]));
+  snapshot.members=[...new Set([...ranking.map(([name])=>name),...starBalances.map(([name])=>name),...bingo.flat(),...monthly.flat()])];
+  snapshot.games=[];
+  snapshot.pptRanking={week:week[0],scores:ranking};
+  snapshot.stars=Object.fromEntries(starBalances);
+  snapshot.boards[currentMonth].done=bingo;
+  snapshot.monthlyMissions[currentMonth].items.forEach((item,index)=>{item.done=monthly[index];});
+  snapshot.monthlyMissions[currentMonth].winGroups=winGroups;
+  snapshot.prizePayments=[];
+  snapshot.starAwards=[];
+  return snapshot;
+}
 function load(){
   let saved;
   try { saved=JSON.parse(localStorage.getItem(key)); }
   catch { saved=null; }
-  saved ??= structuredClone(demo);
+  saved ??= pptMode ? pptSampleData() : structuredClone(demo);
   saved.starMissions ??= [];
   saved.starAwards ??= [];
   saved.monthlyMissions ??= {};
@@ -134,22 +155,31 @@ function save(message){
   render();
 }
 function ranking(period=week){
-  const totals = new Map();
+  const fromPpt=data.pptRanking?.week===period[0];
+  const totals = new Map(fromPpt?data.pptRanking.scores:[]);
   for(const game of data.games.filter(game=>game.day>=period[0] && game.day<=period[1])){
     for(const result of game.results){
       if(result.points>0) totals.set(result.name,(totals.get(result.name) ?? 0) + result.points);
     }
   }
   let previous, rank;
-  return [...totals].sort(([a,x],[b,y])=>y-x || a.localeCompare(b,'ko')).map(([name,points],index)=>{
-    if(points!==previous) rank=index+1;
+  return [...totals].sort(([a,x],[b,y])=>y-x || (fromPpt?0:a.localeCompare(b,'ko'))).map(([name,points],index)=>{
+    if(points!==previous) rank=fromPpt?(rank ?? 0)+1:index+1;
     previous=points;
     return {name,points,rank};
   });
 }
 function leaderboard(){
+  const results=ranking();
+  const groups=new Map();
+  for(const {rank,name,points} of results){
+    if(!groups.has(rank)) groups.set(rank,{points,members:[]});
+    groups.get(rank).members.push(name);
+  }
+  const rows=!admin && pptMode?[...groups].map(([rank,{points,members}])=>`<div class="leader ppt-leader"><span class="rank">${rank}</span><strong>${members.map(esc).join(', ')}</strong><span class="score">${points}점</span></div>`):
+    results.map(({name,points,rank})=>`<div class="leader"><span class="rank">${rank}</span><strong>${esc(name)}</strong><span class="score">${points}점</span></div>`);
   return `<section class="panel"><div class="row headrow"><h2>주간 랭킹</h2><span class="pill">${week[0]} ~ ${week[1]}</span></div>
-  ${ranking().map(({name,points,rank})=>`<div class="leader"><span class="rank">${rank}</span><strong>${esc(name)}</strong><span class="score">${points}점</span></div>`).join('') || '<p class="muted">이번 주에 점수를 획득한 회원이 없습니다.</p>'}</section>`;
+  ${rows.join('') || '<p class="muted">이번 주에 점수를 획득한 회원이 없습니다.</p>'}</section>`;
 }
 function rankOptions(count,rank){
   return options(Array.from({length:count},(_,index)=>[index+1,`${index+1}위`]),rank);
@@ -260,7 +290,8 @@ function monthlyEntry(period){
   const template=period<currentMonth && saved ? [] : data.monthlyTemplate.names;
   return {
     items:[...items,...template.filter(name=>!known.has(name)).map(name=>({name,done:[]}))],
-    prizes:saved?.prizes ?? data.monthlyTemplate.prizes
+    prizes:saved?.prizes ?? data.monthlyTemplate.prizes,
+    winGroups:saved?.winGroups
   };
 }
 function monthlyCompletionCount(entry,name){
@@ -282,14 +313,21 @@ function monthlyPage(){
   const entry=monthlyEntry(missionMonth);
   const paid=paidMembers('monthly',missionMonth);
   const picker=`<label class="field">기준 월<input type="month" id="mission-month" value="${esc(missionMonth)}"></label>`;
-  const cards=entry.items.map((item,index)=>`<article class="panel mission-card">
+  const nicknameList=members=>`<ul class="nickname-list" aria-label="달성 회원">${members.map(name=>`<li class="${paid.has(name)?'paid-nickname':''}">${esc(name)}</li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul>`;
+  const cards=entry.items.map((item,index)=>{
+    const winGroups=!admin && pptMode && index===4 ? entry.winGroups : null;
+    const remaining=winGroups ? item.done.filter(name=>!winGroups.some(([,members])=>members.includes(name))) : item.done;
+    return `<article class="panel mission-card">
     <div class="row headrow"><h2>${esc(item.name)}</h2><span class="pill">${item.done.length}명</span></div>
     ${admin?`<form class="row" data-form="monthly-done">
       <input type="hidden" name="index" value="${index}">
       <label class="field grow">달성 회원<select name="member">${memberOptions()}</select></label><button class="primary">달성 등록</button>
     </form>`:''}
-    <ul class="nickname-list" aria-label="달성 회원">${item.done.map(name=>`<li class="${!admin && paid.has(name)?'paid-nickname':''}">${esc(name)}${admin?`
-      <button type="button" class="secondary nickname-remove" data-action="monthly-undo" data-index="${index}" data-name="${esc(name)}" aria-label="${esc(name)} 달성 취소">×</button>`:''}</li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul></article>`).join('');
+    ${winGroups?`<div class="sample-win-groups">${winGroups.map(([label,members])=>`<div><strong>${esc(label)}</strong>${nicknameList(members.filter(name=>item.done.includes(name)))}</div>`).join('')}</div>`:''}
+    ${admin?`<ul class="nickname-list" aria-label="달성 회원">${item.done.map(name=>`<li>${esc(name)}
+      <button type="button" class="secondary nickname-remove" data-action="monthly-undo" data-index="${index}" data-name="${esc(name)}" aria-label="${esc(name)} 달성 취소">×</button></li>`).join('') || '<li class="muted">달성 회원 없음</li>'}</ul>`:
+      (!winGroups || remaining.length ? nicknameList(remaining) : '')}</article>`;
+  }).join('');
   const prizes=entry.items.length?`<div class="row">${missionMilestones.map(count=>`<span class="pill gold">${count}개 · ${esc(entry.prizes[count]) || '프라이즈 미정'}</span>`).join('')}</div>`:'';
   if(!admin) return `<section class="panel"><div class="row headrow">${picker}${prizes}${paid.size?paidLegend:''}</div>
     ${cards?`<div class="mission-grid">${cards}</div>`:'<p class="muted">등록된 월간 미션이 없습니다.</p>'}</section>`;
@@ -556,10 +594,10 @@ function guestGuide(){
 }
 function render(){
   const menu = `<nav aria-label="화면 메뉴">${tabs.map(([id,label])=>`<button data-tab="${id}" ${id===tab?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
-  const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':'HOLD’EM PUB'}</small></div></div>`;
+  const brand = `<div class="brand"><i aria-hidden="true">♠</i><div>OCEANS PUB<small>${admin?'STORE MANAGEMENT':pptMode?'운영 PPT 샘플':'HOLD’EM PUB'}</small></div></div>`;
   const heading = admin?{games:['게임 결과','회원과 순위를 입력하면 이번 주 점수가 자동으로 집계됩니다.'],types:['게임 종류','매장에서 운영하는 게임과 순위별 배점을 등록하세요.'],bingo:['월간 빙고','월별 미션과 프라이즈를 설정하고 회원의 달성을 기록하세요.'],monthly:['월간 미션','월별 미션을 등록하고 회원별 달성을 기록하세요.'],payouts:['프라이즈 지급','지급 대상을 확인하고 프라이즈 지급을 기록하세요.'],stars:['회원 별 관리','매장 미션을 달성한 회원에게 별을 지급하세요.'],members:['회원 관리','회원별 참여와 방문 기록을 확인하세요.'],stats:['매장 통계','기간별 경기와 회원별 활동을 확인하세요.']}:
     {ranking:['주간 랭킹','이번 주 오션스펍에서 획득한 점수를 확인하세요.'],bingo:['월간 빙고','미션을 달성하고 빙고 프라이즈에 도전하세요.'],monthly:['월간 미션','이번 달 미션과 달성 회원을 확인하세요.'],stars:['회원 별 모으기','오션스펍에서 모은 별을 확인하세요.']};
-  const switcher = admin ? `<a class="switch" href="guest.html${sampleMode?'?sample=1':''}">손님 화면 보기 ↗</a>` :
+  const switcher = admin ? `<a class="switch" href="guest.html${sampleMode?'?sample='+sampleKind:''}">손님 화면 보기 ↗</a>` :
     `<button class="switch fullscreen" type="button" data-action="fullscreen" ${document.fullscreenEnabled?'':'hidden'}>${document.fullscreenElement?'전체 화면 종료':'전체 화면'}</button>`;
   const content=({games,types,bingo,stars:starPage,ranking:leaderboard,monthly:monthlyPage,payouts:payoutPage,members,stats:storeStats})[tab]();
   const main = `<main class="${!admin && tab==='bingo'?'bingo-main':''}"><div class="hero"><div class="eyebrow">${admin?'오션스펍 매장 관리':'오션스펍'}</div><h1>${heading[tab][0]}</h1><p>${heading[tab][1]}</p></div>
