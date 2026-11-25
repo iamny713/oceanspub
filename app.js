@@ -608,6 +608,7 @@ function render(){
   showScoring();
   if(tab==='games') refreshRanks();
   if(tab==='types') syncPointFields();
+  if(!admin && document.fullscreenElement) queueGuestFit();
 }
 function showScoring(){
   const element = document.querySelector('#scoring');
@@ -864,9 +865,43 @@ app.addEventListener('submit',event=>{
     save('미션 달성을 등록했습니다.');
   }
 });
+let guestFitFrame;
+function queueGuestFit(){
+  cancelAnimationFrame(guestFitFrame);
+  guestFitFrame=requestAnimationFrame(fitGuestDisplay);
+}
+function fitGuestDisplay(){
+  if(admin) return;
+  const stage=document.querySelector('main');
+  document.body.classList.toggle('guest-fullscreen',Boolean(document.fullscreenElement));
+  if(!document.fullscreenElement){
+    stage.removeAttribute('data-density');
+    for(const variable of ['--stage-width','--stage-height','--stage-scale']) stage.style.removeProperty(variable);
+    return;
+  }
+  const width=document.documentElement.clientWidth;
+  const available=Math.max(1,window.innerHeight-document.querySelector('.guestbar').getBoundingClientRect().height-2);
+  stage.style.setProperty('--stage-height','0px');
+  stage.style.setProperty('--stage-scale','1');
+  stage.style.setProperty('--stage-width',width+'px');
+  stage.dataset.density='normal';
+  if(stage.offsetHeight>available) stage.dataset.density='compact';
+  if(stage.offsetHeight>available) stage.dataset.density='dense';
+  let scale=1;
+  for(let pass=0;pass<8 && stage.offsetHeight*scale>available;pass++){
+    scale=available/stage.offsetHeight*0.995;
+    stage.style.setProperty('--stage-width',width/scale+'px');
+  }
+  stage.style.setProperty('--stage-scale',scale);
+  stage.style.setProperty('--stage-height',Math.floor(available/scale)+'px');
+}
+window.addEventListener('resize',()=>{
+  if(!admin && document.fullscreenElement) queueGuestFit();
+});
 document.addEventListener('fullscreenchange',()=>{
   const button=document.querySelector('[data-action=fullscreen]');
   if(button) button.textContent=document.fullscreenElement?'전체 화면 종료':'전체 화면';
+  if(!admin) queueGuestFit();
 });
 window.addEventListener('storage',event=>{
   if(event.key!==key && event.key!==null) return;
